@@ -25,6 +25,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import paths  # noqa: E402
 
 # Selection-bit -> adaptation group (RomRaider DS2ResetPanel, verified).
 # The two selection bytes are a 16-bit mask; unsupported bits are ignored
@@ -145,7 +146,7 @@ def reset_adaptations(adapter, groups, transaction_manager=None,
     if transaction_manager is None:
         from transaction import get_transaction_manager
         transaction_manager = get_transaction_manager(
-            backup_root=os.path.join(HERE, "backups"))
+            backup_root=os.path.join(paths.data_dir(), "backups"))
 
     result = transaction_manager.execute(
         vin=vin, module_name="DME", module_addr=0x12,

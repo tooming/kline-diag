@@ -8,6 +8,10 @@ __pycache__/
 _app.iconset/
 _iconbase.png
 
+# PyInstaller frozen-build output
+build/
+dist/
+
 # Runtime writable data — never commit (may contain VIN / vehicle telemetry)
 backups/
 kline_raw.log

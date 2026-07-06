@@ -20,8 +20,8 @@ import datetime
 import json
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-VERIFIED_PATH = os.path.join(HERE, "verified_maps.json")
+import paths
+VERIFIED_PATH = os.path.join(paths.data_dir(), "verified_maps.json")
 
 # Per-channel plausibility ranges for a warm, running engine. A correct map
 # reads inside these; a wrong-address map typically won't.

@@ -22,6 +22,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import paths  # noqa: E402
 from power_diag import KLine, hexs, now  # noqa: E402
 
 DS2_BAUD = 9600
@@ -53,7 +54,7 @@ STATUS_BYTE = {0xA0: "OK", 0xA1: "busy", 0xA2: "invalid parameter",
 def _load_dtc_table(name):
     """Fault-code tables live as JSON next to this script (decimal code ->
     text). ms41_dtc.json came from the OpenMS41 project documentation."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+    path = os.path.join(paths.resource_dir(), name)
     try:
         import json
         with open(path) as f:
@@ -66,8 +67,7 @@ def _load_body_tables():
     """e39_body_dtc_en.json: fault location (ort) + type (art) texts per module,
     extracted from the BMW SGBD docs (emdzej/ediabasx-docs-sgbd) and translated
     to English. Returns (ort_by_addr, art_by_addr) with int keys."""
-    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "e39_body_dtc_en.json")
+    path = os.path.join(paths.resource_dir(), "e39_body_dtc_en.json")
     ort, art = {}, {}
     try:
         import json
@@ -444,9 +444,8 @@ def main():
             p.add_argument("--yes", action="store_true")
     args = ap.parse_args()
 
-    here = os.path.dirname(os.path.abspath(__file__))
     kw = dict(show_raw=args.raw,
-              rawlog_path=os.path.join(here, "kline_raw.log"),
+              rawlog_path=os.path.join(paths.data_dir(), "kline_raw.log"),
               baud=DS2_BAUD, parity="E")
     kl = KLine(args.port, **kw) if args.port else KLine(**kw)
     ds2 = DS2(kl)

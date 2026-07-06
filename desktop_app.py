@@ -26,6 +26,8 @@ import urllib.request
 
 import webview
 
+import paths
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("BMW_DIAG_PORT", "8039"))
 BASE = f"http://127.0.0.1:{PORT}"
@@ -41,13 +43,23 @@ def _server_up():
 
 
 def start_server():
-    """Spawn diag_ui.py and wait for it to come up.
+    """Start the diag server and wait for it to come up.
 
-    Returns the Popen, or None if a server was already running on PORT (in
-    which case we attach to it and leave it alone on exit).
+    Frozen build: run it in-process (a frozen exe can't re-spawn itself as a
+    plain interpreter). From source: spawn diag_ui.py as a child so it owns
+    the serial port in its own process. Returns the Popen (source) or None
+    (frozen / an already-running server we attach to).
     """
     if _server_up():
         return None
+    if paths.is_frozen():
+        import diag_ui
+        diag_ui.serve(port=PORT, connect_car=False, block=False)
+        for _ in range(100):
+            if _server_up():
+                return None
+            time.sleep(0.1)
+        raise SystemExit("diag server did not start within 10 s")
     proc = subprocess.Popen(
         [sys.executable, os.path.join(HERE, "diag_ui.py"),
          "--no-connect", "--port-http", str(PORT)],

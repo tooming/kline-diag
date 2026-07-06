@@ -26,11 +26,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import paths  # noqa: E402
 import power_diag  # noqa: E402
 import ds2_diag    # noqa: E402
 from power_diag import KLine, hexs, frame_payload, now  # noqa: E402
 from transaction import get_transaction_manager  # noqa: E402
 import coding  # noqa: E402
+
+# Read-only bundled resources (ui.html, *.json tables) vs. writable runtime
+# data (logs, backups, snapshots). Identical to the project dir when run from
+# source; they diverge only in a frozen build (see paths.py).
+HERE = paths.resource_dir()
+DATA = paths.data_dir()
 
 E87_DTC = {}
 try:
@@ -161,7 +168,7 @@ class E39Adapter:
 
     def __init__(self, profile="driveability"):
         self.kl = KLine(baud=ds2_diag.DS2_BAUD, parity="E",
-                        rawlog_path=os.path.join(HERE, "kline_raw.log"))
+                        rawlog_path=os.path.join(DATA, "kline_raw.log"))
         self.kl.log = log_hook(self.kl.log)
         self.ds2 = ds2_diag.DS2(self.kl)
         self.current_profile = profile
@@ -500,7 +507,7 @@ class E87Adapter:
     ]
 
     def __init__(self):
-        self.kl = KLine(rawlog_path=os.path.join(HERE, "kline_raw.log"))
+        self.kl = KLine(rawlog_path=os.path.join(DATA, "kline_raw.log"))
         self.kl.log = log_hook(self.kl.log)
         self._live_init = False
 
@@ -680,7 +687,7 @@ def log_vanos_event(event, s):
         "coolant": s.get("P2"),
     }
     try:
-        with open(os.path.join(HERE, "vanos_events.log"), "a") as f:
+        with open(os.path.join(DATA, "vanos_events.log"), "a") as f:
             f.write(json.dumps(snap) + "\n")
     except OSError:
         pass
@@ -949,7 +956,7 @@ def record_start():
         profile = getattr(ADAPTER, "current_profile", None) if ADAPTER else None
         profile_str = f"_{profile}" if profile else ""
         path = os.path.join(
-            HERE, f"drive_log_{time.strftime('%Y%m%d_%H%M%S')}{profile_str}.csv")
+            DATA, f"drive_log_{time.strftime('%Y%m%d_%H%M%S')}{profile_str}.csv")
         f = open(path, "w", buffering=1)
         ids = [c["id"] for c in (ADAPTER.live_channels if ADAPTER else [])]
         # Event columns: event, pull_id, event_data for extensible event system
@@ -1042,7 +1049,7 @@ def connect(proto="auto"):
 
 
 def snapshot_faults(addr, faults):
-    with open(os.path.join(HERE, "fault_snapshots.log"), "a") as f:
+    with open(os.path.join(DATA, "fault_snapshots.log"), "a") as f:
         f.write(json.dumps({
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
             "protocol": ADAPTER.proto if ADAPTER else "?",
@@ -1178,7 +1185,7 @@ class Handler(BaseHTTPRequestHandler):
             # List all backups for current VIN
             if not ADAPTER:
                 return self._json({"error": "not connected"}, 400)
-            tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+            tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
             backups = tm.list_backups(ADAPTER.vin)
             self._json({"vin": ADAPTER.vin, "backups": backups})
         elif self.path.startswith("/api/backup/"):
@@ -1187,7 +1194,7 @@ class Handler(BaseHTTPRequestHandler):
             if not ADAPTER:
                 return self._json({"error": "not connected"}, 400)
             operation_id = self.path.split("/api/backup/")[1]
-            tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+            tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
             backup = tm.get_backup(ADAPTER.vin, operation_id)
             if backup:
                 self._json(backup)
@@ -1363,7 +1370,7 @@ class Handler(BaseHTTPRequestHandler):
         # Read-only, operate on saved files; independent of live adapter.
         elif self.path.startswith("/api/recordings"):
             import glob as _glob
-            files = sorted(_glob.glob(os.path.join(HERE, "drive_log_*.csv")),
+            files = sorted(_glob.glob(os.path.join(DATA, "drive_log_*.csv")),
                            reverse=True)
             out = []
             for p in files:
@@ -1457,7 +1464,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "confirm required"}, 400)
 
                 # Use transaction layer for safe fault clear with backup
-                tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+                tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
                 module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
 
                 with CAR_LOCK:
@@ -1486,7 +1493,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not b.get("confirm"):
                     return self._json({"error": "confirm required"}, 400)
 
-                tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+                tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
 
                 # Load the backup
                 backup = tm.get_backup(ADAPTER.vin, operation_id)
@@ -1596,7 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
                     new_coding = decoder.apply_preset(current_coding, preset)
 
                     # Use transaction manager for safe write
-                    tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+                    tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
 
                     # Create serializable backup data
                     def read_for_backup():
@@ -1702,7 +1709,7 @@ class Handler(BaseHTTPRequestHandler):
                         }
 
                     # Use transaction manager for safe write
-                    tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+                    tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
 
                     result = tm.execute(
                         vin=ADAPTER.vin,
@@ -1740,7 +1747,7 @@ class Handler(BaseHTTPRequestHandler):
                 if ADAPTER.proto != "e39":
                     return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
 
-                tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+                tm = get_transaction_manager(backup_root=os.path.join(DATA, "backups"))
 
                 # Load the backup
                 backup = tm.get_backup(ADAPTER.vin, operation_id)
@@ -2175,20 +2182,35 @@ def sampler():
             time.sleep(0.3)
 
 
+def serve(port=8039, connect_car=False, block=True):
+    """Start the dashboard server + background threads.
+
+    Used by the CLI (main) and, in a frozen desktop build, by desktop_app.py
+    in-process (a frozen exe can't re-spawn itself as a plain interpreter).
+    With block=False the HTTP server runs in a daemon thread and the bound
+    server is returned so the caller can shut it down.
+    """
+    if connect_car:
+        a = connect("auto")
+        print(f"car: {a.name if a else 'not detected — connect via UI'}")
+    threading.Thread(target=csv_writer_thread, daemon=True).start()
+    threading.Thread(target=sampler, daemon=True).start()
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    print(f"UI at http://localhost:{port}")
+    if not block:
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+    srv.serve_forever()
+    return srv
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port-http", type=int, default=8039)
     ap.add_argument("--no-connect", action="store_true",
                     help="start server without touching the car")
     args = ap.parse_args()
-    if not args.no_connect:
-        a = connect("auto")
-        print(f"car: {a.name if a else 'not detected — connect via UI'}")
-    threading.Thread(target=csv_writer_thread, daemon=True).start()
-    threading.Thread(target=sampler, daemon=True).start()
-    srv = ThreadingHTTPServer(("127.0.0.1", args.port_http), Handler)
-    print(f"UI at http://localhost:{args.port_http}")
-    srv.serve_forever()
+    serve(port=args.port_http, connect_car=not args.no_connect)
 
 
 if __name__ == "__main__":

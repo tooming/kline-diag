@@ -25,7 +25,8 @@ Pure stdlib, offline.
 import json
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+import paths
+HERE = paths.resource_dir()
 DB_PATH = os.path.join(HERE, "operations.json")
 
 EVIDENCE_FIELDS = ("documented", "observed", "implemented",

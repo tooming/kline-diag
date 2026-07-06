@@ -24,8 +24,8 @@ import os
 import re
 import sys
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-BACKUP_ROOT = os.path.join(HERE, "backups")
+import paths
+BACKUP_ROOT = os.path.join(paths.data_dir(), "backups")
 
 
 def _slug(text):

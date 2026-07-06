@@ -22,7 +22,8 @@ Pure stdlib, offline.
 import json
 import os
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+import paths
+HERE = paths.resource_dir()
 
 # part-number prefix -> DME descriptor. Prefixes are the leading digits of
 # the DS2 ident ASCII. Sources: RomRaider/ms4x.net ECU-id lists.
