@@ -60,7 +60,7 @@ if sys.platform == 'darwin':
     app = BUNDLE(
         coll,
         name='KlineDiag.app',
-        icon=None,
+        icon='app.icns',
         bundle_identifier='com.tooming.klinediag',
         info_plist={
             'NSHighResolutionCapable': True,
@@ -75,4 +75,5 @@ else:
         name='KlineDiag', debug=False, bootloader_ignore_signals=False,
         strip=False, upx=False, runtime_tmpdir=None,
         console=False, disable_windowed_traceback=False,
+        icon='app.ico',
     )
