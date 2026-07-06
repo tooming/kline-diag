@@ -1,0 +1,23 @@
+{
+  "93B2": "MRS: Battery Safety Terminal (BST)",
+  "C947": "MRS: bus communication fault",
+  "A0B2": "CAS: power supply terminal 30E",
+  "A0C1": "CAS: output terminal 50 (starter)",
+  "A6D1": "JBE: auxiliary water pump",
+  "A6CD": "JBE: wiper function (junction box)",
+  "A738": "JBE: power supply",
+  "931D": "KOMBI: overvoltage/undervoltage",
+  "A3AC": "KOMBI: DSC distance message missing (bus)",
+  "9CCE": "LM: battery exhausted / deep discharge",
+  "9C6C": "IHKA: 12V supply switch center",
+  "5DF7": "DSC: voltage above 18 V",
+  "5E19": "DSC: CAN DME engine torque not adjustable",
+  "5E40": "DSC: steering angle sensor implausible/offset",
+  "D373": "DSC: F-CAN steering angle messages missing",
+  "2C45": "DME: O2 sensor before catalyst (aging)",
+  "2C55": "DME: lambda probe bank 1 sensor 1 aging",
+  "2C56": "DME: lambda probe signal",
+  "2E95": "DME: generator (alternator)",
+  "2EE0": "DME: coolant temperature sensor signal",
+  "2DEB": "DME: power management vehicle electrical system"
+}

@@ -1,0 +1,919 @@
+[
+ {
+  "id": "P13",
+  "name": "..TPS",
+  "desc": "Throttle Position (STATUS_DROSSELKLAPPEN)",
+  "addr": "0x0000E8D7",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255",
+  "addr_by_fw": {
+   "1405854": "0x0000E8D7",
+   "1429373": "0x0000E8D7",
+   "1429861": "0x0000E8D7",
+   "1432401": "0x0000E8D7",
+   "1437806": "0x0000E8D7",
+   "1440176": "0x0000E8D7",
+   "1406464": "0x0000E8D0",
+   "SHINDE1": "0x0000E8D0"
+  }
+ },
+ {
+  "id": "E2",
+  "name": "..Load",
+  "desc": "Engine Load (STATUS_LAST)",
+  "addr": "0x0000FAFC",
+  "storagetype": "uint16",
+  "units": "mg/stroke",
+  "expr": "x*0.0212",
+  "addr_by_fw": {
+   "1429861": "0x0000FAFC",
+   "1437806": "0x0000FC52",
+   "1406464": "0x0000FC52",
+   "SHINDE1": "0x0000E8E4"
+  }
+ },
+ {
+  "id": "P21",
+  "name": "..IPW",
+  "desc": "Fuel Injector Pulse Width (STATUS_EINSPRITZZEIT)",
+  "addr": "0x0000ECBC",
+  "storagetype": "uint16",
+  "units": "ms",
+  "expr": "x*0.00534",
+  "addr_by_fw": {
+   "1406464": "0x0000EF7E",
+   "SHINDE1": "0x0000EF7E",
+   "1429861": "0x0000ECBC",
+   "1437806": "0x0000EF96"
+  }
+ },
+ {
+  "id": "E13",
+  "name": ".STFT1",
+  "desc": "Short Term Fuel Trim (Lambda Integrator) Bank 1",
+  "addr": "0x0000ED5C",
+  "storagetype": "uint16",
+  "units": "%",
+  "expr": "(x-32768)*100/65535",
+  "addr_by_fw": {
+   "1406464": "0x0000F01E",
+   "SHINDE1": "0x0000F01E",
+   "1429861": "0x0000ED5C",
+   "1437806": "0x0000F036"
+  }
+ },
+ {
+  "id": "E14",
+  "name": ".STFT2",
+  "desc": "Short Term Fuel Trim (Lambda Integrator) Bank 2",
+  "addr": "0x0000ED96",
+  "storagetype": "uint16",
+  "units": "%",
+  "expr": "(x-32768)*100/65535",
+  "addr_by_fw": {
+   "1406464": "0x0000F0CA",
+   "SHINDE1": "0x0000F0CA",
+   "1429861": "0x0000ED96",
+   "1437806": "0x0000F0F2"
+  }
+ },
+ {
+  "id": "E15",
+  "name": "O2 Heater - Front #1",
+  "desc": "Upstream Lambda Probe Heater - Bank 1 (STATUS_H_SONDE_1)",
+  "addr": "0x0000EDE3",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255",
+  "addr_by_fw": {
+   "1406464": "0x0000F189",
+   "SHINDE1": "0x0000F189",
+   "1429861": "0x0000EDE3",
+   "1437806": "0x0000F1AF"
+  }
+ },
+ {
+  "id": "E16",
+  "name": "O2 Heater - Front #2",
+  "desc": "Upstream Lambda Probe Heater - Bank 2 (STATUS_H_SONDE_2)",
+  "addr": "0x0000EDEB",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255",
+  "addr_by_fw": {
+   "1406464": "0x0000F191",
+   "SHINDE1": "0x0000F191",
+   "1429861": "0x0000EDEB",
+   "1437806": "0x0000F1B7"
+  }
+ },
+ {
+  "id": "E17",
+  "name": "O2 Heater - Rear #1",
+  "desc": "Downstream Lambda Probe Heater - Bank 1 (STATUS_LS_VKAT_HEIZUNG_TV_1)",
+  "addr": "0x0000F064",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255",
+  "addr_by_fw": {
+   "1406464": "0x0000F064",
+   "SHINDE1": "0x0000F064",
+   "1437806": "0x0000F07C"
+  }
+ },
+ {
+  "id": "E18",
+  "name": "O2 Heater - Rear #2",
+  "desc": "Downstream Lambda Probe Heater - Bank 2 (STATUS_LS_VKAT_HEIZUNG_TV_2)",
+  "addr": "0x0000F110",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255",
+  "addr_by_fw": {
+   "1406464": "0x0000F110",
+   "SHINDE1": "0x0000F110",
+   "1437806": "0x0000F138"
+  }
+ },
+ {
+  "id": "E19",
+  "name": ".IdleFT1",
+  "desc": "Lambda Additive Adaptation - Bank 1 (TI_AD_ADD_1)",
+  "addr": "0x0000ED66",
+  "storagetype": "uint16",
+  "units": "ms",
+  "expr": "(x-32768)*.00534",
+  "addr_by_fw": {
+   "1406464": "0x0000F028",
+   "SHINDE1": "0x0000F028",
+   "1429861": "0x0000ED66",
+   "1437806": "0x0000F040"
+  }
+ },
+ {
+  "id": "E20",
+  "name": ".IdleFT2",
+  "desc": "Lambda Additive Adaptation - Bank 2 (TI_AD_ADD_2)",
+  "addr": "0x0000EDA0",
+  "storagetype": "uint16",
+  "units": "ms",
+  "expr": "(x-32768)*.00534",
+  "addr_by_fw": {
+   "1406464": "0x0000F0D4",
+   "SHINDE1": "0x0000F0D4",
+   "1429861": "0x0000EDA0",
+   "1437806": "0x0000F0FC"
+  }
+ },
+ {
+  "id": "E21",
+  "name": ".LTFT1",
+  "desc": "Long Term Fuel Trim - Bank 1",
+  "addr": "0x0000ED6E",
+  "storagetype": "uint16",
+  "units": "%",
+  "expr": "(x-32768)*100/65535",
+  "addr_by_fw": {
+   "1406464": "0x0000F030",
+   "SHINDE1": "0x0000F030",
+   "1429861": "0x0000ED6E",
+   "1437806": "0x0000F048"
+  }
+ },
+ {
+  "id": "E22",
+  "name": ".LTFT2",
+  "desc": "Long Term Fuel Trim - Bank 2",
+  "addr": "0x0000EDA8",
+  "storagetype": "uint16",
+  "units": "%",
+  "expr": "(x-32768)*100/65535",
+  "addr_by_fw": {
+   "1406464": "0x0000F0DC",
+   "SHINDE1": "0x0000F0DC",
+   "1429861": "0x0000EDA8",
+   "1437806": "0x0000F104"
+  }
+ },
+ {
+  "id": "P8",
+  "name": "..RPM",
+  "desc": "Engine Speed (STATUS_MOTORDREHZAHL)",
+  "addr": "0x0000DA2A",
+  "storagetype": "uint16",
+  "units": "RPM",
+  "expr": "x"
+ },
+ {
+  "id": "P9",
+  "name": "/VS",
+  "desc": "Vehicle Speed (STATUS_GESCHWINDIGKEIT)",
+  "addr": "0x0000DA63",
+  "storagetype": "uint8",
+  "units": "km/h",
+  "expr": "x"
+ },
+ {
+  "id": "E11",
+  "name": ".VANOS",
+  "desc": "VANOS Angle (STATUS_NW_POSITION)",
+  "addr": "0x0000E9E6",
+  "storagetype": "uint8",
+  "units": "KW \u00b0",
+  "expr": "x*0.3745"
+ },
+ {
+  "id": "E217",
+  "name": "..Knock",
+  "desc": "Current knock retard correction applied to total timing",
+  "addr": "0x0000E98D",
+  "storagetype": "uint8",
+  "units": "\u00b0 Cor",
+  "expr": "(x-128)*0.375"
+ },
+ {
+  "id": "P11",
+  "name": "..IAT",
+  "desc": "Intake Air Temperature (STATUS_AN_LUFTTEMPERATUR)",
+  "addr": "0x0000DA50",
+  "storagetype": "uint8",
+  "units": "\u00b0C",
+  "expr": "x*0.747-48"
+ },
+ {
+  "id": "P2",
+  "name": "..ECT",
+  "desc": "Coolant Temperature (STATUS_MOTORTEMPERATUR)",
+  "addr": "0x0000DA5A",
+  "storagetype": "uint8",
+  "units": "\u00b0C",
+  "expr": "x*0.747-48"
+ },
+ {
+  "id": "P10",
+  "name": "..IGN",
+  "desc": "Ignition Angle (STATUS_ZUENDWINKEL)",
+  "addr": "0x0000E989",
+  "storagetype": "uint8",
+  "units": "\u00b0BTDC",
+  "expr": "0.373*x-23.6"
+ },
+ {
+  "id": "E23",
+  "name": "/TPS_Adapt",
+  "desc": "Throttle Position Adaptation (TPS_AD_MMV_IS)",
+  "addr": "0x0000E8DE",
+  "storagetype": "int16",
+  "units": "%",
+  "expr": "x*1.526E-3"
+ },
+ {
+  "id": "E24",
+  "name": "Knock Retard - Global",
+  "desc": "Overall correction applied to total timing",
+  "addr": "0x0000E9D9",
+  "storagetype": "uint8",
+  "units": "\u00b0 Cor",
+  "expr": "(x-128)*0.375"
+ },
+ {
+  "id": "E99",
+  "name": "Knock Adaptation Table 1 Index**",
+  "desc": "E99-Knock Adaptation Table 1 Index Direct RAM Read used by Adaptation display tool",
+  "addr": "0x00D840",
+  "storagetype": "uint8",
+  "units": "\u00b0 Cor",
+  "expr": "(x-128)*0.375"
+ },
+ {
+  "id": "E100",
+  "name": "V_IAT",
+  "desc": "E100-Air Intake Temperature Sensor ADC",
+  "addr": "0x00000000",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E101",
+  "name": "V_O2_Front #1",
+  "desc": "Upstream Oxygen Sensor 1 Volts ADC (STATUS_LS_VKAT_SIGNAL_1)",
+  "addr": "0x00000001",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E102",
+  "name": "V_O2_Front #2",
+  "desc": "Upstream Oxygen Sensor 2 Volts ADC (STATUS_LS_VKAT_SIGNAL_2)",
+  "addr": "0x00000002",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E103",
+  "name": "V_ECT",
+  "desc": "E103-Engine Coolant Temperature Sensor ADC",
+  "addr": "0x00000003",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.00487"
+ },
+ {
+  "id": "P19",
+  "name": ".V_TPS",
+  "desc": "P19-Throttle Position Volts ADC",
+  "addr": "0x00000004",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E105",
+  "name": "V_ZSR",
+  "desc": "E105-STATUS_ZSR Volts ADC",
+  "addr": "0x00000005",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "P18",
+  "name": ".V_MAF",
+  "desc": "Mass Airflow Sensor Volts ADC",
+  "addr": "0x00000006",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "P17",
+  "name": ".V_Batt",
+  "desc": "Battery Voltage",
+  "addr": "0x00000007",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.102"
+ },
+ {
+  "id": "E123",
+  "name": "V_Knock #1",
+  "desc": "Knock Sensor Volts - Bank 1 (STATUS_KLOPF_ADC1)",
+  "addr": "0x00000017",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E124",
+  "name": "V_Knock #2",
+  "desc": "Knock Sensor Volts - Bank 2 (STATUS_KLOPF_ADC2)",
+  "addr": "0x00000018",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E125",
+  "name": "V_O2_Rear #1",
+  "desc": "Downstream Oxygen Sensor 1 Volts (STATUS_VLS_DOWN_1_BAS)",
+  "addr": "0x00000019",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E126",
+  "name": "V_O2_Rear #2",
+  "desc": "Downstream Oxygen Sensor 1 Volts (STATUS_VLS_DOWN_2_BAS)",
+  "addr": "0x0000001A",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.01952"
+ },
+ {
+  "id": "E127",
+  "name": "V_FuelTankPressure",
+  "desc": "Fuel Tank Pressure Sensor Volts",
+  "addr": "0x0000001B",
+  "storagetype": "uint16",
+  "units": "VDC",
+  "expr": "x*0.00488"
+ },
+ {
+  "id": "P12",
+  "name": "..MAF",
+  "desc": "Mass Airflow",
+  "addr": "0x0000DA34",
+  "storagetype": "uint16",
+  "units": "kg/h",
+  "expr": "x*0.25"
+ },
+ {
+  "id": "E9",
+  "name": ".IACV",
+  "desc": "Idle Air Control Valve (STATUS_LL_REGLER)",
+  "addr": "0x0000DA36",
+  "storagetype": "uint16",
+  "units": "%",
+  "expr": "x*0.00153"
+ },
+ {
+  "id": "E201",
+  "name": ".IACV_AlphaN",
+  "desc": "Idle Air Control Valve - AlphaN (TAST_LL_STELLER)",
+  "addr": "0x0000DA38",
+  "storagetype": "uint16",
+  "units": "%",
+  "expr": "x*0.00153"
+ },
+ {
+  "id": "E202",
+  "name": "PWM_Evap",
+  "desc": "Fuel Vapor Canister Purge Valve PWM Duty Cycle (STATUS_TEV_TAST)",
+  "addr": "0x0000DA56",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255"
+ },
+ {
+  "id": "E204",
+  "name": "Knock Sensor Cylinder 1",
+  "desc": "E204-Result knock sensor increment cyl1 Direct RAM Read (STATUS_K_MW)",
+  "addr": "0x0000DA65",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E205",
+  "name": "Knock Sensor Cylinder 2",
+  "desc": "E205-Result knock sensor increment cyl2 Direct RAM Read (STATUS_K_MW)",
+  "addr": "0x0000DA68",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E206",
+  "name": "Knock Sensor Cylinder 3",
+  "desc": "E206-Result knock sensor increment cyl3 Direct RAM Read (STATUS_K_MW)",
+  "addr": "0x0000DA67",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E207",
+  "name": "Knock Sensor Cylinder 4",
+  "desc": "E207-Result knock sensor increment cyl4 Direct RAM Read (STATUS_K_MW)",
+  "addr": "0x0000DA69",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E208",
+  "name": "Knock Sensor Cylinder 5",
+  "desc": "E208-Result knock sensor increment cyl5 Direct RAM Read (STATUS_K_MW)",
+  "addr": "0x0000DA66",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E209",
+  "name": "Knock Sensor Cylinder 6",
+  "desc": "E209-Result knock sensor increment cyl6 Direct RAM Read (STATUS_K_MW)",
+  "addr": "0x0000DA64",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E210",
+  "name": "STATUS_VANOS_VERSTELLWINKEL",
+  "desc": "E210-STATUS_VANOS_VERSTELLWINKEL Direct RAM Read",
+  "addr": "0x0000DAA4",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "P24",
+  "name": "Atmospheric Pressure**",
+  "desc": "P24-A temporary fake entry for the Dyno tab",
+  "addr": "0x0000DAA5",
+  "storagetype": "uint8",
+  "units": "psi",
+  "expr": "101.325*37/255"
+ },
+ {
+  "id": "E211",
+  "name": "STATUS_GEBERRAD_ADAPTION",
+  "desc": "E211-STATUS_GEBERRAD_ADAPTION Direct RAM Read",
+  "addr": "0x0000DB0F",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E212",
+  "name": "STATUS_TANK_DIFF_DRUCK",
+  "desc": "E212-STATUS_TANK_DIFF_DRUCK Direct RAM Read",
+  "addr": "0x0000DB10",
+  "storagetype": "uint16",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E213",
+  "name": "STATUS_TIMER_TE_DIAG",
+  "desc": "E213-STATUS_TIMER_TE_DIAG Direct RAM Read",
+  "addr": "0x0000DB14",
+  "storagetype": "uint16",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E214",
+  "name": "STATUS_LAMBDA_COUNTER",
+  "desc": "E214-STATUS_LAMBDA_COUNTER Direct RAM Read",
+  "addr": "0x0000EDE6",
+  "storagetype": "uint16",
+  "units": "?",
+  "expr": "x"
+ },
+ {
+  "id": "E215",
+  "name": "STATUS_TIMER_TL_SP_DTE",
+  "desc": "E215-STATUS_TIMER_TL_SP_DTE Direct RAM Read",
+  "addr": "0x0000F576",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x",
+  "addr_by_fw": {
+   "1406464": "0x0000F576",
+   "SHINDE1": "0x0000F576",
+   "1437806": "0x0000F58C"
+  }
+ },
+ {
+  "id": "E216",
+  "name": "STATUS_TIMER_NB_SP_DTE",
+  "desc": "E216-STATUS_TIMER_NB_SP_DTE Direct RAM Read",
+  "addr": "0x0000F578",
+  "storagetype": "uint8",
+  "units": "?",
+  "expr": "x",
+  "addr_by_fw": {
+   "1406464": "0x0000F578",
+   "SHINDE1": "0x0000F578",
+   "1437806": "0x0000F58E"
+  }
+ },
+ {
+  "id": "E202",
+  "name": ".WGDC",
+  "desc": "Wastegate Duty Cycle (MS41.3)",
+  "addr": "0x0000DA56",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*100/255"
+ },
+ {
+  "id": "P58",
+  "name": ".WBO2",
+  "desc": "Wideband O2 AFR (MS41.3)",
+  "addr": "0x0000E800",
+  "storagetype": "uint8",
+  "units": "AFR",
+  "expr": "x*0.05+8.25"
+ },
+ {
+  "id": "E131",
+  "name": ".FF %",
+  "desc": "FlexFuel Content % (MS41.3)",
+  "addr": "0x0000E801",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*0.392"
+ },
+ {
+  "id": "E85",
+  "name": ".FF_IPW %",
+  "desc": "Ethanol - Fuel Trim (MS41.3)",
+  "addr": "0x0000E809",
+  "storagetype": "uint8",
+  "units": "%",
+  "expr": "x*0.392"
+ },
+ {
+  "id": "E86",
+  "name": ".FF_IGN %",
+  "desc": "Ethanol - Ignition Advance (MS41.3)",
+  "addr": "0x0000E808",
+  "storagetype": "uint8",
+  "units": "\u00b0Crk",
+  "expr": "(x-128)*0.373"
+ },
+ {
+  "id": "P7",
+  "name": ".MAP",
+  "desc": "Manifold Absolute Pressure (MS41.3)",
+  "addr": "0x0000E806",
+  "storagetype": "uint16",
+  "units": "kPa",
+  "expr": "x*.01"
+ },
+ {
+  "id": "E87",
+  "name": ".OilP",
+  "desc": "Engine Oil Pressure (MS41.3)",
+  "addr": "0x0000E803",
+  "storagetype": "uint8",
+  "units": "psi",
+  "expr": "x*0.6"
+ },
+ {
+  "id": "E88",
+  "name": ".FuelP",
+  "desc": "Engine Fuel Pressure (MS41.3)",
+  "addr": "0x0000E802",
+  "storagetype": "uint8",
+  "units": "psi",
+  "expr": "x*0.6"
+ },
+ {
+  "id": "E203",
+  "name": "SW - BELADUNG",
+  "desc": "Loading???? (STATUS_FLAG_BELADUNG)",
+  "addr": "0x0000DA57",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S0",
+  "name": "SW - Compressor Signal",
+  "desc": "S0-S_KO",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S1",
+  "name": "SW - A/C (High load)",
+  "desc": "Air Conditioning (S_AC)",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S2",
+  "name": "SW - Theft Deterrent System",
+  "desc": "S2-S_DWA",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S3",
+  "name": "SW - Torque Reduction Request - Gear-Shift",
+  "desc": "S3-S_GS",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S4",
+  "name": "SW - Engine Drag Torque Reduction",
+  "desc": "S4-S_MSR",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S5",
+  "name": "SW - Torque Reduction Request",
+  "desc": "S5-S_ASC",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S6",
+  "name": "SW - Full Load",
+  "desc": "S6-S_VL",
+  "addr": "0x0000FD24",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S7",
+  "name": "SW - Part Load",
+  "desc": "S7-Part load",
+  "addr": "0x0000FD14",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S8",
+  "name": "SW - Closed Throttle",
+  "desc": "S8-S_LL",
+  "addr": "0x0000FD24",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "!BitWise(1,x,1)"
+ },
+ {
+  "id": "S9",
+  "name": "SW - S_REG2",
+  "desc": "S9-S_REG2",
+  "addr": "0x0000ED92",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "BitWise(8,x,1)/8",
+  "addr_by_fw": {
+   "1429861": "0x0000ED92",
+   "1406464": "0x0000F0C6",
+   "SHINDE1": "0x0000F0C6",
+   "1437806": "0x0000F0EE"
+  }
+ },
+ {
+  "id": "S10",
+  "name": "SW - S_REG1",
+  "desc": "S10-S_REG1",
+  "addr": "0x0000ED58",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "BitWise(8,x,1)/8",
+  "addr_by_fw": {
+   "1429861": "0x0000ED58",
+   "1406464": "0x0000F01A",
+   "SHINDE1": "0x0000F01A",
+   "1437806": "0x0000F032"
+  }
+ },
+ {
+  "id": "S11",
+  "name": "SW - Trailing Throttle Fuel Cut Off",
+  "desc": "S11-LV_PUC",
+  "addr": "0x0000FD14",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S12",
+  "name": "SW - Accel. Enrich.",
+  "desc": "Acceleration Enrichment (LV_AE)",
+  "addr": "0x0000FD13",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S13",
+  "name": "SW - Engine Start",
+  "desc": "Operating State - Engine Start LV_ST",
+  "addr": "0x0000FD14",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S14",
+  "name": "SW - Drive Engaged (AT)",
+  "desc": "S14-S_FS",
+  "addr": "0x0000FD18",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S15",
+  "name": "SW - Generator",
+  "desc": "S15-S_GE",
+  "addr": "0x0000F19A",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x",
+  "addr_by_fw": {
+   "1429861": "0x0000F19A",
+   "1406464": "0x0000F762",
+   "SHINDE1": "0x0000F762",
+   "1437806": "0x0000F762"
+  }
+ },
+ {
+  "id": "S16",
+  "name": "SW - S_CAN",
+  "desc": "S16-S_CAN",
+  "addr": "0x0000FD4C",
+  "storagetype": "uint16",
+  "units": "On/Off",
+  "expr": "if(BitWise(896,x,1)&gt;0,1,0)",
+  "addr_by_fw": {
+   "1429861": "0x0000FD4C",
+   "1406464": "0x0000FD5C",
+   "SHINDE1": "0x0000FD5C",
+   "1437806": "0x0000FD5C"
+  }
+ },
+ {
+  "id": "S17",
+  "name": "SW - Secondary Air Valve",
+  "desc": "S17-S_SLV",
+  "addr": "0x0000FD54",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S18",
+  "name": "SW - Secondary Air Pump",
+  "desc": "S18-S_SLP",
+  "addr": "0x0000FD54",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S19",
+  "name": "SW - Tank Ventilation Valve",
+  "desc": "S19-S_AAV",
+  "addr": "0x0000FD56",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x",
+  "addr_by_fw": {
+   "1406464": "0x0000FD56",
+   "SHINDE1": "0x0000FD56",
+   "1437806": "0x0000FD5A"
+  }
+ },
+ {
+  "id": "S20",
+  "name": "Rear Defogger Switch",
+  "desc": "S20",
+  "addr": "0x0000FD53",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S22",
+  "name": "SW - Exhaust Flap",
+  "desc": "S22-S_KLAPPE",
+  "addr": "0x0000FD08",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "x"
+ },
+ {
+  "id": "S23",
+  "name": "SW - S_VANOS",
+  "desc": "S23-S_VANOS",
+  "addr": "0x0000FFC1",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "!BitWise(16,x,1)/16"
+ },
+ {
+  "id": "S24",
+  "name": "SW - Compressor Relay",
+  "desc": "S24-S_KO_REL",
+  "addr": "0x0000F141",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "!BitWise(32,x,1)/32",
+  "addr_by_fw": {
+   "1429861": "0x0000F141",
+   "1406464": "0x0000F6E5",
+   "SHINDE1": "0x0000F6E5",
+   "1437806": "0x0000F6DB"
+  }
+ },
+ {
+  "id": "S25",
+  "name": "SW - Fuel Pump",
+  "desc": "S25-S_EKP",
+  "addr": "0x0000FFC4",
+  "storagetype": "uint8",
+  "units": "On/Off",
+  "expr": "!BitWise(32,x,1)/32"
+ }
+]

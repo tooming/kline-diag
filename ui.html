@@ -1,0 +1,2746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BMW K-Line Diagnostics</title>
+<style>
+  :root {
+    --bg: #14171c; --panel: #1d222a; --panel2: #242a34; --fg: #dfe6ee;
+    --dim: #8b97a5; --accent: #4da3ff; --ok: #46d68c; --warn: #ffb454;
+    --err: #ff5d5d; --line: #313945;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+           background: var(--panel); border-bottom: 1px solid var(--line);
+           position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  .badge { padding: 2px 10px; border-radius: 12px; font-size: 12px;
+           background: var(--panel2); color: var(--dim); }
+  .badge.on { color: var(--ok); }
+  .badge.off { color: var(--err); }
+  .badge.rec { color: var(--err); font-weight: 700; }
+  button { background: var(--panel2); color: var(--fg); cursor: pointer;
+           border: 1px solid var(--line); border-radius: 6px;
+           padding: 5px 12px; font-size: 13px; }
+  button:hover { border-color: var(--accent); }
+  button.danger { color: #ffd7d7; background: #57272b; border-color: #7a3a3f; }
+  button.rec-on { color: #fff; background: #b3282f; border-color: #d8464e; }
+  button:disabled { opacity: .45; cursor: default; }
+  main { display: grid; grid-template-columns: 330px 1fr; gap: 14px;
+         padding: 14px; max-width: 1500px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line);
+            border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+  section h2 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase;
+               letter-spacing: .07em; color: var(--dim); }
+  .mod { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+         margin-bottom: 8px; background: var(--panel2); }
+  .mod-head { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .mod-name { flex: 1; font-weight: 600; font-size: 13px; }
+  .mod-addr { color: var(--dim); font-family: ui-monospace, monospace; }
+  .pill { min-width: 22px; text-align: center; padding: 1px 8px;
+          border-radius: 10px; font-size: 12px; font-weight: 700; }
+  .pill.clean { background: #1c3b2c; color: var(--ok); }
+  .pill.bad { background: #4a2626; color: var(--err); }
+  .pill.unk { background: var(--panel); color: var(--dim); }
+  .faults { margin-top: 8px; display: none; }
+  .fault { padding: 6px 8px; border-left: 3px solid var(--warn);
+           background: var(--panel); margin-bottom: 6px; border-radius: 4px; }
+  .fault code { color: var(--warn); font-weight: 700; }
+  .fault .txt { display: block; }
+  .fault .bits { color: var(--dim); font-size: 12px; }
+  .fault-actions { display: flex; gap: 8px; margin-top: 6px; }
+  .group-title { font-size: 11px; text-transform: uppercase; color: var(--dim);
+                 letter-spacing: .08em; margin: 10px 0 6px; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 8px; }
+  .tile { background: var(--panel2); border: 1px solid var(--line);
+          border-radius: 8px; padding: 6px 12px; min-width: 108px;
+          cursor: pointer; user-select: none; }
+  .tile.charted { border-color: var(--accent);
+                  box-shadow: 0 0 0 1px var(--accent) inset; }
+  .tile .v { font-size: 22px; font-weight: 700;
+             font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  canvas { width: 100%; height: 130px; background: var(--panel2);
+           border: 1px solid var(--line); border-radius: 8px; }
+  .chart-label { font-size: 12px; color: var(--dim); margin: 10px 0 4px; }
+  .chart-label b { color: var(--fg); }
+  #rawlog { font: 11px ui-monospace, monospace; background: #101318;
+            border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+            height: 150px; overflow-y: auto; white-space: pre; color: #9fb3c8; }
+  #rawlog .tx { color: #6fb3ff; }
+  #rawlog .rx { color: #7ddba3; }
+  .muted { color: var(--dim); }
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 10px;
+         flex-wrap: wrap; }
+  .health-panel { background: var(--panel2); border: 1px solid var(--line);
+                  border-radius: 8px; padding: 10px; margin-bottom: 10px;
+                  overflow: hidden; max-width: 100%; }
+  .health-grid { display: flex; flex-direction: column; gap: 8px; }
+  .health-item { display: flex; align-items: center; gap: 8px;
+                 padding: 6px 10px; background: var(--panel);
+                 border-radius: 6px; border: 1px solid var(--line); }
+  .health-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .health-dot.green { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .health-dot.yellow { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .health-dot.red { background: var(--err); box-shadow: 0 0 6px var(--err); }
+  .health-dot.blue { background: #4da3ff; box-shadow: 0 0 6px #4da3ff; }
+  .health-text { flex: 1; font-size: 12px; min-width: 0; }
+  .health-label { color: var(--dim); font-size: 10px; text-transform: uppercase;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .health-value { color: var(--fg); font-weight: 600;
+                  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .health-metric { color: var(--dim); font-size: 11px; margin-left: 4px; }
+  .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+           background: rgba(0,0,0,0.7); z-index: 1000; align-items: center;
+           justify-content: center; }
+  .modal-content { background: var(--panel); border: 1px solid var(--line);
+                   border-radius: 12px; padding: 20px; max-width: 500px;
+                   width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
+  .modal-title { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+  .modal-body { margin-bottom: 16px; line-height: 1.5; }
+  .modal-body code { background: var(--panel2); padding: 2px 6px;
+                     border-radius: 4px; font-family: ui-monospace, monospace; }
+  .modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+  button.primary { background: var(--accent); color: #fff;
+                   border-color: var(--accent); }
+  .backup-item { border: 1px solid var(--line); border-radius: 6px;
+                 padding: 8px 10px; margin-bottom: 6px; background: var(--panel2);
+                 cursor: pointer; transition: border-color 0.2s; }
+  .backup-item:hover { border-color: var(--accent); }
+  .backup-time { font-size: 11px; color: var(--dim); margin-bottom: 2px; }
+  .backup-op { font-weight: 600; font-size: 13px; margin-bottom: 2px; }
+  .backup-modules { font-size: 11px; color: var(--dim); }
+  .backup-verified { display: inline-block; padding: 2px 6px; border-radius: 4px;
+                     font-size: 10px; font-weight: 700; margin-left: 8px; }
+  .backup-verified.yes { background: #1c3b2c; color: var(--ok); }
+  .backup-verified.no { background: #4a2626; color: var(--err); }
+  .backup-verified.pending { background: var(--panel); color: var(--dim); }
+  .diff-container { display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+                    margin-top: 12px; }
+  .diff-side { background: var(--panel2); border-radius: 6px; padding: 10px; }
+  .diff-title { font-size: 12px; font-weight: 700; color: var(--dim);
+                text-transform: uppercase; margin-bottom: 8px;
+                letter-spacing: 0.05em; }
+  .diff-line { padding: 4px 6px; border-radius: 3px; margin-bottom: 2px;
+               font-family: ui-monospace, monospace; font-size: 11px;
+               line-height: 1.4; }
+  .diff-line.added { background: rgba(70, 214, 140, 0.15);
+                     border-left: 3px solid var(--ok); }
+  .diff-line.removed { background: rgba(255, 93, 93, 0.15);
+                       border-left: 3px solid var(--err); }
+  .diff-line.changed { background: rgba(255, 180, 84, 0.15);
+                       border-left: 3px solid var(--warn); }
+  .diff-line.same { color: var(--dim); }
+  .diff-key { color: var(--accent); }
+  .diff-value { color: var(--fg); }
+  .diff-value.old { color: var(--err); text-decoration: line-through; }
+  .diff-value.new { color: var(--ok); font-weight: 600; }
+  .event-marker { padding: 4px 8px; border-radius: 4px; margin-bottom: 4px;
+                  font-size: 11px; border-left: 3px solid; cursor: pointer;
+                  transition: background 0.2s; }
+  .event-marker:hover { background: var(--panel); }
+  .event-marker.pull_start { border-color: var(--ok); background: rgba(70, 214, 140, 0.1); }
+  .event-marker.pull_end { border-color: var(--dim); background: rgba(139, 151, 165, 0.1); }
+  .event-marker.profile_change { border-color: var(--accent); background: rgba(77, 163, 255, 0.1); }
+  .event-time { color: var(--dim); margin-right: 6px; }
+  .event-label { font-weight: 600; }
+  .event-data { color: var(--dim); font-size: 10px; margin-left: 6px; }
+  #replayprogress { -webkit-appearance: none; appearance: none; height: 6px;
+                    background: var(--panel2); border-radius: 3px; outline: none; }
+  #replayprogress::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+                                          width: 14px; height: 14px; background: var(--accent);
+                                          border-radius: 50%; cursor: pointer; }
+  #replayprogress::-moz-range-thumb { width: 14px; height: 14px; background: var(--accent);
+                                      border-radius: 50%; cursor: pointer; border: none; }
+  .coding-byte { border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+                 margin-bottom: 6px; background: var(--panel2); }
+  .coding-byte-header { font-size: 11px; color: var(--dim); margin-bottom: 4px;
+                        text-transform: uppercase; letter-spacing: 0.05em; }
+  .coding-byte-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .coding-byte-value { font-size: 12px; color: var(--ok); margin-bottom: 6px; }
+  .coding-bit { padding: 4px 8px; background: var(--panel); border-radius: 4px;
+                margin-bottom: 3px; font-size: 11px; display: flex;
+                justify-content: space-between; align-items: center; }
+  .coding-bit-name { color: var(--fg); }
+  .coding-bit-value { color: var(--accent); font-weight: 600; }
+  .coding-raw { font-family: ui-monospace, monospace; font-size: 12px;
+                background: var(--panel); padding: 8px; border-radius: 4px;
+                color: var(--dim); margin-top: 8px; }
+  /* Tab navigation */
+  .tabhide { display: none !important; }
+  #tabbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 12px; }
+  .tabbtn { background: var(--panel2); color: var(--dim); border: 1px solid var(--line);
+            border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .tabbtn:hover { color: var(--fg); border-color: var(--accent); }
+  .tabbtn.active { background: var(--accent); color: #fff; border-color: var(--accent);
+                   font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BMW K-Line Diagnostics</h1>
+  <span id="conn" class="badge off">disconnected</span>
+  <span id="proto" class="badge"></span>
+  <span id="recbadge" class="badge" style="display:none">● REC</span>
+  <span id="pullbadge" class="badge" style="display:none;background:#ff3b30;color:#fff;font-weight:700">🔴 PULL</span>
+  <span style="flex:1"></span>
+  <select id="protosel">
+    <option value="auto">auto-detect</option>
+    <option value="e39">E39 (DS2)</option>
+    <option value="e87">E87 (KWP2000)</option>
+    <option value="demo">Demo (no car)</option>
+  </select>
+  <button id="connect">Connect</button>
+</header>
+<main>
+  <div>
+    <div id="tabbar">
+      <button class="tabbtn active" data-tabbtn="dashboard">Dashboard</button>
+      <button class="tabbtn" data-tabbtn="diagnostics">Diagnostics</button>
+      <button class="tabbtn" data-tabbtn="analysis">Analysis</button>
+      <button class="tabbtn" data-tabbtn="service">Service</button>
+      <button class="tabbtn" data-tabbtn="explorer">Explorer</button>
+    </div>
+    <section data-tab="dashboard" id="dashboardsec" style="display:none">
+      <h2>Dashboard</h2>
+      <div id="vehicleinfo" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">VEHICLE</div>
+        <div id="vehiclemodel" style="font-size:16px;font-weight:700;margin-bottom:6px">-</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px">
+          <div><span style="color:var(--dim)">VIN:</span> <span id="vehiclevin">-</span></div>
+          <div><span style="color:var(--dim)">Year:</span> <span id="vehicleyear">-</span></div>
+          <div><span style="color:var(--dim)">Engine:</span> <span id="vehicleengine">-</span></div>
+          <div><span style="color:var(--dim)">Protocol:</span> <span id="vehicleprotocol">-</span></div>
+        </div>
+        <div id="enginedme" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;display:none">
+          <span style="color:var(--dim)">DME map:</span>
+          <span id="dmename" style="font-weight:600">-</span>
+          <span id="dmegrade" class="pill" style="font-size:10px"></span>
+          <button id="verifybtn" style="font-size:11px;padding:2px 8px;margin-left:6px;display:none">Verify this map</button>
+          <div id="verifystat" class="muted" style="font-size:11px;margin-top:4px"></div>
+        </div>
+      </div>
+      <div id="quickstatus" style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">STATUS</div>
+        <div class="health-grid" id="quickstatusitems">
+          <div class="muted">Connect to view status.</div>
+        </div>
+      </div>
+      <div id="ecugrid" style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">ECUS (<span id="ecucount">0</span>)</div>
+        <div id="eculist" class="muted">Scan modules to populate.</div>
+      </div>
+      <div id="quickactions">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">ACTIONS</div>
+        <div class="row" style="gap:6px">
+          <button id="dashscan" style="font-size:12px">🔍 Scan</button>
+          <button id="dashfaults" style="font-size:12px">⚠️ Faults</button>
+          <button id="dashlive" style="font-size:12px">📊 Live</button>
+        </div>
+      </div>
+    </section>
+    <section data-tab="analysis" id="snapshotsec" style="display:none">
+      <h2>Snapshots</h2>
+      <div class="row" style="margin-bottom:8px">
+        <input type="text" id="snapdesc" placeholder="Description (optional)" style="flex:1;padding:4px 8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--fg)">
+        <button id="snapcreate" style="font-size:12px">📸 Create</button>
+      </div>
+      <div id="snaplist" class="muted">Connect to view snapshots.</div>
+    </section>
+    <section data-tab="diagnostics">
+      <h2>Modules</h2>
+      <div class="row">
+        <button id="scan">Scan modules</button>
+        <button id="readall">Read all faults</button>
+      </div>
+      <div id="modules"><div class="muted">Not scanned yet.</div></div>
+    </section>
+    <section data-tab="analysis" id="analysissec" style="display:none">
+      <h2>Analysis — Compare Drives</h2>
+      <div class="row" style="flex-wrap:wrap;gap:6px">
+        <select id="cmpA" style="font-size:12px;max-width:150px"></select>
+        <span class="muted">vs</span>
+        <select id="cmpB" style="font-size:12px;max-width:150px"></select>
+        <button id="cmprun" style="font-size:12px">Compare</button>
+      </div>
+      <div id="cmpfindings" style="margin-top:8px"></div>
+    </section>
+    <section data-tab="explorer" id="protocolsec" style="display:none">
+      <h2>Protocol Explorer</h2>
+      <div id="opsummary" class="muted" style="font-size:12px;margin-bottom:8px">-</div>
+      <div class="row">
+        <select id="opsecu"><option value="">All ECUs</option></select>
+        <button id="opsload" style="font-size:12px">Load operations</button>
+      </div>
+      <div id="opslist" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;margin-top:6px"></div>
+      <div class="muted" style="font-size:11px;margin-top:6px">Evidence grades: verified (implemented+tested) · observed (seen in a working tool) · documented (in a BMW SGBD job).</div>
+    </section>
+    <section data-tab="explorer" id="devsec" style="display:none">
+      <h2>Developer Mode</h2>
+      <div style="padding:8px;background:var(--panel2);border:1px solid var(--warn);border-radius:6px;margin-bottom:8px;font-size:11px">
+        ⚠️ <strong>Read-only console</strong> — only read services allowed. Write/actuate/clear services are blocked before the bus.
+      </div>
+      <details style="margin-bottom:8px;font-size:11px">
+        <summary style="cursor:pointer;color:var(--accent)">What is this? How do I use it?</summary>
+        <div style="padding:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-top:6px;line-height:1.5">
+          <p style="margin:0 0 6px">This sends a <strong>raw diagnostic command</strong> to one module and shows the reply.
+          You need two things:</p>
+          <p style="margin:0 0 4px"><strong>1. Addr</strong> — which module to talk to (its bus address, in hex):</p>
+          <table style="width:100%;border-collapse:collapse;margin:0 0 8px;font-family:monospace">
+            <tr><td style="padding:1px 6px"><code>12</code></td><td>DME (engine)</td>
+                <td style="padding:1px 6px"><code>60</code></td><td>IKE / cluster</td></tr>
+            <tr><td style="padding:1px 6px"><code>56</code></td><td>LCM (lights)</td>
+                <td style="padding:1px 6px"><code>00</code></td><td>GM (body/central)</td></tr>
+            <tr><td style="padding:1px 6px"><code>5B</code></td><td>IHKA (climate)</td>
+                <td style="padding:1px 6px"><code>D0</code></td><td>DSC (ABS)</td></tr>
+          </table>
+          <p style="margin:0 0 4px"><strong>2. Payload</strong> — the service (command) to run, in hex. Read-only ones:</p>
+          <table style="width:100%;border-collapse:collapse;margin:0 0 8px;font-family:monospace">
+            <tr><td style="padding:1px 6px"><code>00</code></td><td>Identify (part no, sw version)</td></tr>
+            <tr><td style="padding:1px 6px"><code>04</code></td><td>Read fault memory</td></tr>
+            <tr><td style="padding:1px 6px"><code>0B&nbsp;03</code></td><td>Read status block 03 (live values)</td></tr>
+            <tr><td style="padding:1px 6px"><code>21&nbsp;5A</code></td><td>Read data record 5A (e.g. battery V)</td></tr>
+          </table>
+          <p style="margin:0">The frame wrapper (length byte + checksum) is added for you — type only the service bytes.
+          Anything that writes, actuates, or clears is refused here on purpose.
+          <br><strong>Where to find more commands:</strong> the <em>Protocol Explorer</em> tab lists 400+ known
+          jobs per module (with evidence grades), and <code>docs/OPERATIONS.md</code> documents them.</p>
+        </div>
+      </details>
+      <div class="row" style="margin-bottom:6px;flex-wrap:wrap;gap:4px">
+        <span class="muted" style="font-size:11px">Quick fill:</span>
+        <button class="devpreset" data-addr="12" data-pl="00" style="font-size:11px">DME ident</button>
+        <button class="devpreset" data-addr="12" data-pl="04" style="font-size:11px">DME faults</button>
+        <button class="devpreset" data-addr="12" data-pl="0B 03" style="font-size:11px">DME live 03</button>
+        <button class="devpreset" data-addr="12" data-pl="21 5A" style="font-size:11px">DME battery</button>
+        <button class="devpreset" data-addr="60" data-pl="00" style="font-size:11px">IKE ident</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <input type="text" id="devaddr" placeholder="Addr (hex)" value="12" style="width:80px;padding:4px 8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--fg);font-family:monospace">
+        <input type="text" id="devpayload" placeholder="Payload (hex bytes: 00 1A...)" style="flex:1;padding:4px 8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--fg);font-family:monospace">
+        <button id="devsend" style="font-size:12px">Send</button>
+      </div>
+      <div id="devresponse" style="background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;min-height:100px;max-height:200px;overflow-y:auto;font-family:monospace;font-size:11px"></div>
+      <div class="muted" style="font-size:10px;margin-top:6px">
+        Examples: <code>00</code> (ident), <code>04</code> (read faults), <code>0B 03</code> (status), <code>21 5A</code> (read data)
+      </div>
+    </section>
+    <section data-tab="explorer" id="ramsec" style="display:none">
+      <h2>RAM Explorer</h2>
+      <div style="padding:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:8px;font-size:11px">
+        Read-only live memory viewer (E39/MS41, service 0B 01/00). Capture RAM at
+        idle vs. higher RPM, then <strong>Diff</strong> to reveal which addresses
+        track a parameter — how you locate an unknown sensor's address.
+      </div>
+      <details style="margin-bottom:8px;font-size:11px">
+        <summary style="cursor:pointer;color:var(--accent)">What is this? How do I use it?</summary>
+        <div style="padding:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-top:6px;line-height:1.5">
+          <p style="margin:0 0 6px">The DME keeps every live value (RPM, coolant, load…) somewhere in its RAM.
+          This tool reads raw bytes at an address so you can <strong>find which byte holds which value</strong>
+          — the groundwork for logging a signal that has no named parameter yet.</p>
+          <p style="margin:0 0 4px"><strong>To hunt for an unknown value's address:</strong></p>
+          <ol style="margin:0 0 8px;padding-left:18px">
+            <li>At idle, press <strong>Capture A</strong>.</li>
+            <li>Hold the engine at higher revs (or change the thing you're chasing), press <strong>Capture B</strong>.</li>
+            <li>Press <strong>Diff A↔B</strong>. Bytes that changed are candidates; the one that tracks RPM
+            is your address.</li>
+          </ol>
+          <p style="margin:0 0 6px"><strong>Where do the addresses come from?</strong> Start from a byte you already know
+          and read a window around it. Known MS41 addresses (use the quick-pick below):</p>
+          <table style="width:100%;border-collapse:collapse;margin:0;font-family:monospace">
+            <tr><td style="padding:1px 6px"><code>DA2A</code></td><td>RPM (2 bytes)</td>
+                <td style="padding:1px 6px"><code>DA5A</code></td><td>Coolant temp</td></tr>
+            <tr><td style="padding:1px 6px"><code>DA50</code></td><td>Intake air temp</td>
+                <td style="padding:1px 6px"><code>DA63</code></td><td>Vehicle speed</td></tr>
+            <tr><td style="padding:1px 6px"><code>FAFC</code></td><td>Engine load</td>
+                <td style="padding:1px 6px"><code>E9E6</code></td><td>VANOS</td></tr>
+          </table>
+          <p style="margin:6px 0 0">Full list lives in <code>ms41_ram_params.json</code>. This panel only reads —
+          it never writes to the ECU.</p>
+        </div>
+      </details>
+      <div class="row" style="margin-bottom:6px;flex-wrap:wrap;gap:4px">
+        <span class="muted" style="font-size:11px">Quick-pick:</span>
+        <button class="rampreset" data-start="DA28" style="font-size:11px">RPM area</button>
+        <button class="rampreset" data-start="DA50" style="font-size:11px">Temps</button>
+        <button class="rampreset" data-start="FAFC" style="font-size:11px">Load</button>
+        <button class="rampreset" data-start="E9E0" style="font-size:11px">VANOS</button>
+      </div>
+      <div class="row" style="margin-bottom:6px">
+        <span class="muted" style="font-size:12px">0x</span>
+        <input type="text" id="ramstart" value="DA28" style="width:70px;padding:4px 8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--fg);font-family:monospace">
+        <span class="muted" style="font-size:12px">count</span>
+        <input type="number" id="ramcount" value="16" min="1" max="64" style="width:60px;padding:4px 8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--fg)">
+        <button id="ramread" style="font-size:12px">Read</button>
+      </div>
+      <div id="ramdump" style="background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:8px;min-height:40px;font-family:ui-monospace,monospace;font-size:11px;color:#9fb3c8;white-space:pre-wrap"></div>
+      <div class="row" style="margin-top:8px;gap:6px">
+        <button id="ramcapA" style="font-size:12px">Capture A (idle)</button>
+        <button id="ramcapB" style="font-size:12px">Capture B (revs)</button>
+        <button id="ramdiff" style="font-size:12px">Diff A↔B</button>
+        <span id="ramcapstat" class="muted" style="font-size:11px"></span>
+      </div>
+      <div id="ramdiffout" style="margin-top:6px"></div>
+    </section>
+    <section data-tab="service" id="servicesec" style="display:none">
+      <h2>Service</h2>
+      <div class="row">
+        <button id="siabtn" class="danger">Reset oil service (SIA)</button>
+      </div>
+      <div id="siastat" class="muted"></div>
+      <div class="muted" style="font-size:12px;margin-top:6px">
+        Experimental — this cluster rejected the reconstructed command.
+        Manual fallback that always works: ignition off, hold the odometer
+        button, ignition to position 1, keep holding ~5&nbsp;s until
+        "OIL SERVICE RESET" shows, release, press again to confirm.
+      </div>
+    </section>
+    <section data-tab="analysis" id="backupsec">
+      <h2>Backup History</h2>
+      <div id="backuplist" class="muted">Connect to view backups.</div>
+    </section>
+    <section data-tab="analysis" id="replaysec">
+      <h2>Replay Recordings</h2>
+      <div class="row" style="margin-bottom:8px">
+        <input type="file" id="replayfile" accept=".csv" style="font-size:12px;color:var(--fg)">
+      </div>
+      <div id="replaystatus" class="muted">Load a CSV recording to replay.</div>
+      <div id="replaycontrols" style="display:none;margin-top:10px">
+        <div class="row" style="gap:6px;margin-bottom:8px">
+          <button id="replaybtn">▶ Play</button>
+          <button id="replaypausebtn">⏸ Pause</button>
+          <button id="replaystopbtn">⏹ Stop</button>
+          <select id="replayspeed" style="font-size:12px;padding:4px">
+            <option value="0.25">0.25×</option>
+            <option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="5">5×</option>
+            <option value="10">10×</option>
+          </select>
+        </div>
+        <div style="margin-bottom:8px">
+          <input type="range" id="replayprogress" min="0" max="100" value="0"
+                 style="width:100%;cursor:pointer">
+        </div>
+        <div id="replaytime" style="font-size:11px;color:var(--dim)"></div>
+      </div>
+      <div id="replayevents" style="margin-top:10px"></div>
+    </section>
+    <section data-tab="diagnostics" id="codingsec" style="display:none">
+      <h2>Coding</h2>
+      <div class="row" style="margin-bottom:8px">
+        <select id="codingmodule" style="font-size:12px;flex:1">
+          <option value="">Select module...</option>
+          <option value="0x80">IKE (Instrument Cluster)</option>
+          <option value="0xD0">LCM (Light Control)</option>
+          <option value="0x00">GM (General Module)</option>
+          <option value="0x5B">IHKA (Climate Control)</option>
+        </select>
+        <button id="readcoding">Read</button>
+      </div>
+      <div id="codingstatus" class="muted">Select a module to read its coding.</div>
+      <div id="codingdata" style="display:none;margin-top:10px"></div>
+    </section>
+    <section data-tab="service" id="adaptationsec" style="display:none">
+      <h2>Adaptations</h2>
+      <div style="padding:8px;background:var(--panel2);border:1px solid var(--warn);border-radius:6px;margin-bottom:8px;font-size:11px">
+        ⚠️ <strong>Reset learned values</strong> — uses transaction layer (backup → reset → verify). ECU will relearn during next drive.
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <select id="adaptmodule" style="font-size:12px;flex:1">
+          <option value="">Select module...</option>
+          <option value="DME">DME (Engine)</option>
+        </select>
+        <button id="adaptload">Load</button>
+      </div>
+      <div id="adaptstatus" class="muted">Select a module to view adaptations.</div>
+      <div id="adaptlist" style="display:none;margin-top:10px"></div>
+    </section>
+    <section data-tab="service" id="actuatorsec" style="display:none">
+      <h2>Actuator Tests</h2>
+      <div style="padding:8px;background:var(--panel2);border:1px solid var(--err);border-radius:6px;margin-bottom:8px;font-size:11px">
+        ⚠️ <strong>DANGER:</strong> Activates physical outputs! Only test with engine off/ignition on unless specified. Emergency stop: turn ignition off.
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <select id="actuatormodule" style="font-size:12px;flex:1">
+          <option value="">Select module...</option>
+          <option value="DME">DME (Engine)</option>
+          <option value="LCM">LCM (Lights)</option>
+        </select>
+        <button id="actuatorload">Load</button>
+      </div>
+      <div id="actuatorstatus" class="muted">Select a module to view tests.</div>
+      <div id="actuatorlist" style="display:none;margin-top:10px"></div>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Live data</h2>
+      <div class="row">
+        <button id="livebtn">Start live</button>
+        <button id="recbtn">⏺ Record to CSV</button>
+        <select id="profilesel" style="display:none">
+          <option value="driveability">Driveability</option>
+          <option value="fuel">Fuel</option>
+          <option value="knock">Knock</option>
+          <option value="sensors">Sensors</option>
+          <option value="vanos">VANOS</option>
+        </select>
+        <button id="calibratebtn" style="display:none">⚙ Calibrate gears</button>
+        <span id="livestat" class="muted"></span>
+        <span id="ratestat" class="muted"></span>
+      </div>
+      <div id="events" style="font-size:12px;margin-bottom:6px"></div>
+      <div id="profstats" class="muted" style="font-size:11px;margin-bottom:10px;display:none"></div>
+      <div id="healthpanel" class="health-panel">
+        <div style="font-size:11px;text-transform:uppercase;color:var(--dim);margin-bottom:8px;letter-spacing:0.05em">Engine Health</div>
+        <div id="healthgrid" class="health-grid">
+          <div style="color:var(--dim);font-size:12px;padding:8px">Waiting for live data...</div>
+        </div>
+      </div>
+      <div id="tilegroups"></div>
+      <div class="muted" style="margin-top:8px;font-size:12px">
+        Click a tile to add/remove its graph.
+      </div>
+      <div id="charts"></div>
+    </section>
+    <section>
+      <h2>Raw K-line traffic</h2>
+      <div id="rawlog"></div>
+    </section>
+  </div>
+</main>
+<div id="calmodal" class="modal">
+  <div class="modal-content">
+    <div class="modal-title" id="caltitle">Calibrate Gear Ratios</div>
+    <div class="modal-body" id="calbody">
+      <p>This wizard will capture your car's exact gear ratios.</p>
+      <p>For each gear, drive steadily at <code>2500-3000 RPM</code> and click <strong>Capture</strong>.</p>
+      <p>20-30 samples will be collected per gear.</p>
+    </div>
+    <div class="modal-buttons" id="calbuttons">
+      <button onclick="startCalibration(2)">Start with 2nd gear</button>
+      <button onclick="closeCalModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let state = { channels: [], protocol: null };
+let es = null, logSince = 0, charted = [], recOn = false;
+let sampleTimes = [];
+
+// Replay state
+let replayData = null;
+let replayPlaying = false;
+let replayIndex = 0;
+let replayTimer = null;
+let replaySpeed = 1.0;
+
+// Parameter label mapping for replay mode
+const PARAM_LABELS = {"P13": {"label": "TPS", "unit": "%"}, "E2": {"label": "Load", "unit": "mg/stroke"}, "P21": {"label": "IPW", "unit": "ms"}, "E13": {"label": "STFT1", "unit": "%"}, "E14": {"label": "STFT2", "unit": "%"}, "E15": {"label": "O2 Heater - Front #1", "unit": "%"}, "E16": {"label": "O2 Heater - Front #2", "unit": "%"}, "E19": {"label": "IdleFT1", "unit": "ms"}, "E20": {"label": "IdleFT2", "unit": "ms"}, "E21": {"label": "LTFT1", "unit": "%"}, "E22": {"label": "LTFT2", "unit": "%"}, "P8": {"label": "RPM", "unit": "RPM"}, "P9": {"label": "Speed", "unit": "km/h"}, "E11": {"label": "VANOS", "unit": "°"}, "E217": {"label": "Knock", "unit": "°"}, "P11": {"label": "IAT", "unit": "°C"}, "P2": {"label": "ECT", "unit": "°C"}, "P10": {"label": "IGN", "unit": "°BTDC"}, "E23": {"label": "TPS Adapt", "unit": "%"}, "E24": {"label": "Knock Global", "unit": "°"}, "E99": {"label": "Knock Adapt", "unit": "°"}, "E100": {"label": "IAT V", "unit": "V"}, "E101": {"label": "O2 #1 V", "unit": "V"}, "E102": {"label": "O2 #2 V", "unit": "V"}, "E103": {"label": "ECT V", "unit": "V"}, "P19": {"label": "TPS V", "unit": "V"}, "E105": {"label": "ZSR V", "unit": "V"}, "P18": {"label": "MAF V", "unit": "V"}, "P17": {"label": "Battery", "unit": "V"}, "E123": {"label": "Knock #1 V", "unit": "V"}, "E124": {"label": "Knock #2 V", "unit": "V"}, "E127": {"label": "Tank P V", "unit": "V"}, "P12": {"label": "MAF", "unit": "kg/h"}, "E9": {"label": "IACV", "unit": "%"}, "E201": {"label": "IACV AlphaN", "unit": "%"}, "E202": {"label": "Evap PWM", "unit": "%"}, "E204": {"label": "Knock Cyl 1", "unit": ""}, "E205": {"label": "Knock Cyl 2", "unit": ""}, "E206": {"label": "Knock Cyl 3", "unit": ""}, "E207": {"label": "Knock Cyl 4", "unit": ""}, "E208": {"label": "Knock Cyl 5", "unit": ""}, "E209": {"label": "Knock Cyl 6", "unit": ""}, "E210": {"label": "VANOS Angle", "unit": ""}, "P24": {"label": "Atm Press", "unit": "psi"}, "E203": {"label": "Load SW", "unit": ""}, "S0": {"label": "A/C Comp", "unit": ""}, "S1": {"label": "A/C High", "unit": ""}, "S2": {"label": "Theft", "unit": ""}, "S3": {"label": "Gear Shift", "unit": ""}, "S4": {"label": "Drag Torque", "unit": ""}, "S5": {"label": "Torque Req", "unit": ""}, "S6": {"label": "Full Load", "unit": ""}, "S7": {"label": "Part Load", "unit": ""}, "S8": {"label": "Closed Throttle", "unit": ""}, "S9": {"label": "REG2", "unit": ""}, "S10": {"label": "REG1", "unit": ""}, "S11": {"label": "DFCO", "unit": ""}, "S12": {"label": "Accel", "unit": ""}, "S13": {"label": "Start", "unit": ""}, "S14": {"label": "Drive", "unit": ""}, "S15": {"label": "Generator", "unit": ""}, "S16": {"label": "CAN", "unit": ""}, "S22": {"label": "Exhaust", "unit": ""}, "S23": {"label": "VANOS SW", "unit": ""}, "S24": {"label": "Comp Relay", "unit": ""}, "S25": {"label": "Fuel Pump", "unit": ""}};
+
+async function api(path, body) {
+  const opt = body !== undefined
+    ? { method: "POST", body: JSON.stringify(body) } : {};
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+function setState(s) {
+  state = s;
+  $("conn").textContent = s.connected ? "connected" : "disconnected";
+  $("conn").className = "badge " + (s.connected ? "on" : "off");
+  $("proto").textContent = s.name || (s.error || "");
+  $("servicesec").style.display = s.protocol === "e39" ? "" : "none";
+  $("codingsec").style.display = s.protocol === "e39" && s.connected ? "" : "none"; // Show coding when E39 connected (including demo)
+  $("adaptationsec").style.display = s.protocol === "e39" && s.connected ? "" : "none"; // Show adaptations when E39 connected
+  $("actuatorsec").style.display = s.protocol === "e39" && s.connected ? "" : "none"; // Show actuators when E39 connected
+  $("dashboardsec").style.display = s.connected ? "" : "none";  // Show dashboard when connected
+  $("devsec").style.display = s.connected ? "" : "none";  // Show developer mode when connected
+
+  // show profile selector only for E39
+  const profileSel = $("profilesel");
+  const profStats = $("profstats");
+  if (s.protocol === "e39" && s.profiles && s.profiles.length) {
+    profileSel.style.display = "";
+    $("calibratebtn").style.display = "";  // show calibrate button for E39
+    if (s.profile) profileSel.value = s.profile;
+    // show profile stats
+    if (s.profile_stats) {
+      const st = s.profile_stats;
+      profStats.textContent = `Profile: ${s.profile} • Parameters: ${st.total} (ADC: ${st.adc}, RAM: ${st.ram})`;
+      profStats.style.display = "";
+      // warn if close to limits
+      if (st.total > 18 || st.adc > 5) {
+        profStats.style.color = "var(--warn)";
+      } else {
+        profStats.style.color = "var(--dim)";
+      }
+    }
+  } else {
+    profileSel.style.display = "none";
+    profStats.style.display = "none";
+  }
+
+  // preserve charted channels that exist in new profile
+  const oldCharted = charted.slice();
+  charted = (s.channels || []).filter(c => c.graph).map(c => c.id);
+  // restore user-charted channels that still exist
+  for (const id of oldCharted) {
+    if ((s.channels || []).find(c => c.id === id) && !charted.includes(id)) {
+      charted.push(id);
+    }
+  }
+
+  buildTiles();
+  buildCharts();
+  loadBackups();  // Load backup history when state changes
+  loadDashboard();  // Load dashboard when state changes
+  loadSnapshots();  // Load snapshots when state changes
+  loadProtocolExplorer();  // Protocol Explorer summary
+  loadAnalysis();  // Compare-drives panel
+  showRam();  // RAM Explorer visibility
+}
+
+function chanById(id) { return (state.channels || []).find(c => c.id === id); }
+
+async function loadBackups() {
+  const box = $("backuplist");
+  if (!state.connected) {
+    box.innerHTML = '<div class="muted">Connect to view backups.</div>';
+    return;
+  }
+
+  try {
+    const r = await api("/api/backups");
+    if (r.error) {
+      box.innerHTML = `<div class="muted">${r.error}</div>`;
+      return;
+    }
+
+    if (!r.backups || r.backups.length === 0) {
+      box.innerHTML = '<div class="muted">No backups yet.</div>';
+      return;
+    }
+
+    box.innerHTML = "";
+    for (const b of r.backups) {
+      const item = document.createElement("div");
+      item.className = "backup-item";
+
+      let verifiedBadge = "";
+      if (b.verified === true) {
+        verifiedBadge = '<span class="backup-verified yes">✓ VERIFIED</span>';
+      } else if (b.verified === false) {
+        verifiedBadge = '<span class="backup-verified no">✗ FAILED</span>';
+      } else {
+        verifiedBadge = '<span class="backup-verified pending">PENDING</span>';
+      }
+
+      const modules = b.modules.join(", ");
+      const note = b.user_note ? ` — ${b.user_note}` : "";
+
+      item.innerHTML = `
+        <div class="backup-time">${b.timestamp}</div>
+        <div class="backup-op">${b.operation}${verifiedBadge}</div>
+        <div class="backup-modules">${modules}${note}</div>
+      `;
+
+      item.onclick = async () => {
+        const detail = await api(`/api/backup/${b.operation_id}`);
+        if (detail.error) {
+          alert(`Failed to load backup: ${detail.error}`);
+          return;
+        }
+        showBackupDetail(detail);
+      };
+
+      box.appendChild(item);
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="muted">Error loading backups: ${e.message}</div>`;
+  }
+}
+
+async function loadDashboard() {
+  const dashSec = $("dashboardsec");
+  if (!state.connected) {
+    dashSec.style.display = "none";
+    return;
+  }
+
+  dashSec.style.display = "";
+
+  // Load vehicle info
+  try {
+    const v = await api("/api/vehicle");
+    if (!v.error) {
+      $("vehiclemodel").textContent = v.model || "Unknown";
+      $("vehiclevin").textContent = v.vin || "Unknown";
+      $("vehicleyear").textContent = v.year || "Unknown";
+      $("vehicleengine").textContent = v.engine || "Unknown";
+      $("vehicleprotocol").textContent = v.protocol || "Unknown";
+    }
+  } catch (e) {
+    console.error("Failed to load vehicle info:", e);
+  }
+
+  // Engine/DME detection + evidence grade + verify control
+  try {
+    const eng = await api("/api/engine");
+    const d = eng.detected;
+    const box = $("enginedme");
+    if (d && d.dme) {
+      box.style.display = "";
+      $("dmename").textContent = `${d.engine} / ${d.dme} (${d.param_count} params)`;
+      const grade = $("dmegrade");
+      grade.textContent = d.verified ? "car-verified" : (d.base_evidence || "sourced");
+      grade.className = "pill " + (d.verified ? "clean" : "unk");
+      // offer verify only when not yet verified and live data is flowing
+      $("verifybtn").style.display = d.verified ? "none" : "";
+    } else {
+      box.style.display = "none";
+    }
+  } catch (e) { /* engine endpoint optional */ }
+
+  // Load modules summary
+  try {
+    const m = await api("/api/modules/summary");
+    if (!m.error && m.modules) {
+      $("ecucount").textContent = m.modules.length;
+      const list = $("eculist");
+      list.innerHTML = "";
+      for (const mod of m.modules) {
+        const item = document.createElement("div");
+        item.style.cssText = "padding:6px 8px;margin-bottom:4px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px";
+        item.innerHTML = `
+          <div style="font-weight:600;margin-bottom:2px">${mod.name}</div>
+          <div style="color:var(--dim);display:grid;grid-template-columns:auto 1fr;gap:6px">
+            <span>Addr:</span><span>0x${mod.addr.toString(16).toUpperCase()}</span>
+            <span>Part:</span><span style="font-family:monospace;font-size:10px">${mod.part_number}</span>
+          </div>
+        `;
+        list.appendChild(item);
+      }
+    }
+  } catch (e) {
+    console.error("Failed to load modules summary:", e);
+  }
+
+  // Quick status - show basic health indicators if available
+  const statusItems = $("quickstatusitems");
+  statusItems.innerHTML = '<div class="health-item"><div class="health-dot green"></div><div class="health-text"><div class="health-label">CONNECTION</div><div class="health-value">Connected</div></div></div>';
+}
+
+async function loadSnapshots() {
+  const sec = $("snapshotsec");
+  const list = $("snaplist");
+
+  if (!state.connected) {
+    sec.style.display = "none";
+    return;
+  }
+
+  sec.style.display = "";
+
+  try {
+    const r = await api("/api/snapshots");
+    if (!r || r.length === 0) {
+      list.innerHTML = '<div class="muted">No snapshots yet. Create one to capture current state.</div>';
+      return;
+    }
+
+    list.innerHTML = "";
+    for (const snap of r) {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 10px;margin-bottom:6px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;cursor:pointer";
+      item.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:600;font-size:12px">${snap.id}</span>
+          <span class="pill ${snap.total_faults > 0 ? 'bad' : 'clean'}">${snap.total_faults} faults</span>
+        </div>
+        <div style="font-size:11px;color:var(--dim)">${snap.description || '(no description)'}</div>
+        <div style="font-size:10px;color:var(--dim);margin-top:2px">${snap.timestamp} • ${snap.module_count} modules</div>
+      `;
+      item.onclick = () => showSnapshotDetail(snap.id);
+      list.appendChild(item);
+    }
+  } catch (e) {
+    list.innerHTML = `<div class="muted">Error loading snapshots: ${e.message}</div>`;
+  }
+}
+
+async function showSnapshotDetail(snapId) {
+  try {
+    const snap = await api(`/api/snapshot/${snapId}`);
+    if (snap.error) {
+      alert(`Failed to load snapshot: ${snap.error}`);
+      return;
+    }
+
+    const modal = document.createElement("div");
+    modal.className = "modal";
+    modal.style.display = "flex";
+
+    let modulesHtml = "";
+    for (const mod of snap.modules) {
+      modulesHtml += `
+        <div style="padding:8px;background:var(--panel2);border-radius:4px;margin-bottom:6px">
+          <div style="font-weight:600;margin-bottom:4px">${mod.name} (0x${mod.addr.toString(16).toUpperCase()})</div>
+          <div style="font-size:11px;color:var(--dim)">Faults: ${mod.fault_count} • Ident: ${mod.ident}</div>
+        </div>
+      `;
+    }
+
+    const content = `
+      <div class="modal-content">
+        <h3 style="margin-top:0">Snapshot: ${snap.id}</h3>
+        <div style="margin-bottom:12px">
+          <strong>Description:</strong> ${snap.description || '(none)'}<br>
+          <strong>Timestamp:</strong> ${snap.timestamp}<br>
+          <strong>VIN:</strong> ${snap.vin}<br>
+          <strong>Modules:</strong> ${snap.modules.length}<br>
+          <strong>Total Faults:</strong> ${snap.total_faults}
+        </div>
+        <div style="max-height:300px;overflow-y:auto">${modulesHtml}</div>
+        <div style="margin-top:16px;text-align:right">
+          <button id="closesnap">Close</button>
+        </div>
+      </div>
+    `;
+
+    modal.innerHTML = content;
+    document.body.appendChild(modal);
+
+    modal.onclick = (e) => {
+      if (e.target === modal) document.body.removeChild(modal);
+    };
+    modal.querySelector("#closesnap").onclick = () => document.body.removeChild(modal);
+  } catch (e) {
+    alert(`Error loading snapshot: ${e.message}`);
+  }
+}
+
+function showBackupDetail(backup) {
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.style.display = "flex";
+
+  const meta = backup.metadata;
+  const dataKeys = Object.keys(backup.data);
+
+  let dataHtml = "";
+  for (const module of dataKeys) {
+    const moduleData = backup.data[module];
+    dataHtml += `<h3>${module}</h3><pre style="background:var(--panel2);padding:8px;border-radius:4px;overflow:auto;max-height:300px;font-size:11px">${JSON.stringify(moduleData, null, 2)}</pre>`;
+  }
+
+  const resultHtml = meta.result ? `
+    <div style="margin-top:12px">
+      <strong>Result:</strong><br>
+      Verified: ${meta.result.verified ? "✓ Yes" : "✗ No"}<br>
+      ${meta.result.verification_error ? `Error: ${meta.result.verification_error}<br>` : ""}
+      ${meta.result.rolled_back ? "⚠ Rolled back" : ""}
+    </div>
+  ` : "";
+
+  // Show restore button for coding operations
+  const isCodingOp = meta.operation.includes("coding");
+  const restoreBtn = isCodingOp ? '<button id="restoreBackup" style="background:var(--warn)">Restore This Coding</button>' : '';
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:800px">
+      <div class="modal-title">Backup Details</div>
+      <div class="modal-body">
+        <strong>Operation:</strong> ${meta.operation}<br>
+        <strong>Timestamp:</strong> ${meta.timestamp}<br>
+        <strong>VIN:</strong> ${meta.vin}<br>
+        <strong>User Note:</strong> ${meta.user_note || "(none)"}<br>
+        ${resultHtml}
+        <div style="margin-top:16px">
+          ${dataHtml}
+        </div>
+      </div>
+      <div class="modal-buttons">
+        ${restoreBtn}
+        <button id="diffVsCurrent">Compare vs. Current</button>
+        <button id="closeBackupModal">Close</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      document.body.removeChild(modal);
+    }
+  };
+
+  modal.querySelector("#closeBackupModal").onclick = () => {
+    document.body.removeChild(modal);
+  };
+
+  modal.querySelector("#diffVsCurrent").onclick = async () => {
+    document.body.removeChild(modal);
+    await showDiffVsCurrent(backup);
+  };
+
+  if (isCodingOp) {
+    modal.querySelector("#restoreBackup").onclick = async () => {
+      document.body.removeChild(modal);
+      await showRestoreConfirm(backup);
+    };
+  }
+}
+
+async function showDiffVsCurrent(backup) {
+  const meta = backup.metadata;
+  const modules = Object.keys(backup.data);
+
+  if (modules.length === 0) {
+    alert("No module data in backup to compare");
+    return;
+  }
+
+  // For now, compare first module only (typically DME for fault clears)
+  const moduleName = modules[0];
+  const moduleInfo = meta.modules[moduleName];
+  const addr = moduleInfo.addr;
+  const backupData = backup.data[moduleName];
+
+  // Fetch current state from car
+  const currentState = await api("/api/faults", { addr });
+
+  if (currentState.error) {
+    alert(`Failed to read current state: ${currentState.error}`);
+    return;
+  }
+
+  showDiff(backupData, currentState, `${moduleName} (backup)`, `${moduleName} (current)`, meta);
+}
+
+async function showRestoreConfirm(backup) {
+  const meta = backup.metadata;
+  const modules = Object.keys(backup.data);
+
+  if (modules.length === 0) {
+    alert("No module data in backup to restore");
+    return;
+  }
+
+  // For coding operations, restore first module (typically one module per coding operation)
+  const moduleName = modules[0];
+  const moduleInfo = meta.modules[moduleName];
+  const backupData = backup.data[moduleName];
+
+  // Check if this is a coding backup
+  if (!backupData.raw_hex || !backupData.decoded) {
+    alert("This backup does not contain coding data");
+    return;
+  }
+
+  const modal = document.createElement("div");
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center";
+
+  const box = document.createElement("div");
+  box.style.cssText = "background:var(--bg);padding:20px;border-radius:4px;max-width:600px;max-height:80vh;overflow-y:auto";
+
+  box.innerHTML = `
+    <h3 style="margin-top:0;color:var(--warn)">⚠️ Restore Coding</h3>
+    <p>This will restore coding from backup:</p>
+    <div style="margin:16px 0;padding:12px;background:var(--panel);border-radius:4px">
+      <strong>Backup:</strong> ${meta.operation_id}<br>
+      <strong>Module:</strong> ${moduleName}<br>
+      <strong>Date:</strong> ${meta.timestamp}<br>
+      <strong>Note:</strong> ${meta.user_note || "(none)"}<br>
+      <strong>Raw hex:</strong> <code>${backupData.raw_hex}</code>
+    </div>
+    <p style="color:var(--warn)">⚠️ This will overwrite the current module coding. A backup of the current state will be created automatically.</p>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button id="confirmrestore" style="flex:1;background:var(--warn)">Restore</button>
+      <button id="cancelrestore" style="flex:1">Cancel</button>
+    </div>
+    <div id="restoreresult" style="margin-top:16px"></div>
+  `;
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+
+  const resultDiv = box.querySelector("#restoreresult");
+  box.querySelector("#cancelrestore").onclick = () => document.body.removeChild(modal);
+
+  box.querySelector("#confirmrestore").onclick = async () => {
+    const btn = box.querySelector("#confirmrestore");
+    btn.disabled = true;
+    btn.textContent = "Restoring...";
+
+    try {
+      const result = await api("/api/coding/restore", {
+        operation_id: meta.operation_id,
+        module_name: moduleName,
+        confirm: true
+      });
+
+      if (result.error) {
+        resultDiv.innerHTML = `<div style="color:var(--err)">Error: ${result.error}</div>`;
+        btn.disabled = false;
+        btn.textContent = "Restore";
+      } else if (result.success) {
+        resultDiv.innerHTML = `
+          <div style="color:var(--ok)">✓ Coding restored successfully!</div>
+          <div class="muted" style="margin-top:8px">New backup created: ${result.backup_path}</div>
+        `;
+        btn.textContent = "Close";
+        btn.onclick = () => {
+          document.body.removeChild(modal);
+          loadBackups(); // Refresh backup list
+        };
+      } else {
+        resultDiv.innerHTML = `
+          <div style="color:var(--warn)">⚠️ Verification failed: ${result.error}</div>
+          <div class="muted" style="margin-top:8px">Backup saved to: ${result.backup_path}</div>
+        `;
+        btn.disabled = false;
+        btn.textContent = "Restore";
+      }
+    } catch (err) {
+      resultDiv.innerHTML = `<div style="color:var(--err)">Error: ${err.message}</div>`;
+      btn.disabled = false;
+      btn.textContent = "Restore";
+    }
+  };
+}
+
+function computeDiff(oldObj, newObj) {
+  const diff = { added: [], removed: [], changed: [], same: [] };
+
+  const oldKeys = new Set(Object.keys(oldObj));
+  const newKeys = new Set(Object.keys(newObj));
+
+  // Find added keys
+  for (const key of newKeys) {
+    if (!oldKeys.has(key)) {
+      diff.added.push({ key, value: newObj[key] });
+    }
+  }
+
+  // Find removed keys
+  for (const key of oldKeys) {
+    if (!newKeys.has(key)) {
+      diff.removed.push({ key, value: oldObj[key] });
+    }
+  }
+
+  // Find changed/same keys
+  for (const key of oldKeys) {
+    if (newKeys.has(key)) {
+      const oldVal = JSON.stringify(oldObj[key]);
+      const newVal = JSON.stringify(newObj[key]);
+      if (oldVal !== newVal) {
+        diff.changed.push({ key, oldValue: oldObj[key], newValue: newObj[key] });
+      } else {
+        diff.same.push({ key, value: oldObj[key] });
+      }
+    }
+  }
+
+  return diff;
+}
+
+function renderDiffLine(item, type) {
+  const div = document.createElement("div");
+  div.className = `diff-line ${type}`;
+
+  if (type === "added") {
+    div.innerHTML = `<span class="diff-key">${item.key}:</span> <span class="diff-value new">${JSON.stringify(item.value)}</span>`;
+  } else if (type === "removed") {
+    div.innerHTML = `<span class="diff-key">${item.key}:</span> <span class="diff-value old">${JSON.stringify(item.value)}</span>`;
+  } else if (type === "changed") {
+    div.innerHTML = `<span class="diff-key">${item.key}:</span> <span class="diff-value old">${JSON.stringify(item.oldValue)}</span> → <span class="diff-value new">${JSON.stringify(item.newValue)}</span>`;
+  } else {
+    div.innerHTML = `<span class="diff-key">${item.key}:</span> <span class="diff-value">${JSON.stringify(item.value)}</span>`;
+  }
+
+  return div;
+}
+
+function showDiff(oldData, newData, leftTitle, rightTitle, metadata = null) {
+  const modal = document.createElement("div");
+  modal.className = "modal";
+  modal.style.display = "flex";
+
+  const diff = computeDiff(oldData, newData);
+
+  const leftPane = document.createElement("div");
+  leftPane.className = "diff-side";
+  leftPane.innerHTML = `<div class="diff-title">${leftTitle}</div>`;
+
+  const rightPane = document.createElement("div");
+  rightPane.className = "diff-side";
+  rightPane.innerHTML = `<div class="diff-title">${rightTitle}</div>`;
+
+  // Show removed items only on left
+  for (const item of diff.removed) {
+    leftPane.appendChild(renderDiffLine(item, "removed"));
+    const placeholder = document.createElement("div");
+    placeholder.className = "diff-line";
+    placeholder.style.opacity = "0.3";
+    placeholder.textContent = "(removed)";
+    rightPane.appendChild(placeholder);
+  }
+
+  // Show added items only on right
+  for (const item of diff.added) {
+    const placeholder = document.createElement("div");
+    placeholder.className = "diff-line";
+    placeholder.style.opacity = "0.3";
+    placeholder.textContent = "(not in backup)";
+    leftPane.appendChild(placeholder);
+    rightPane.appendChild(renderDiffLine(item, "added"));
+  }
+
+  // Show changed items on both sides
+  for (const item of diff.changed) {
+    leftPane.appendChild(renderDiffLine({ key: item.key, value: item.oldValue }, "removed"));
+    rightPane.appendChild(renderDiffLine({ key: item.key, value: item.newValue }, "added"));
+  }
+
+  // Show same items (collapsed by default)
+  if (diff.same.length > 0) {
+    const sameSummary = document.createElement("div");
+    sameSummary.className = "diff-line same";
+    sameSummary.textContent = `... ${diff.same.length} unchanged fields (click to expand)`;
+    sameSummary.style.cursor = "pointer";
+    sameSummary.style.fontStyle = "italic";
+
+    const sameContainer = document.createElement("div");
+    sameContainer.style.display = "none";
+
+    for (const item of diff.same) {
+      sameContainer.appendChild(renderDiffLine(item, "same"));
+    }
+
+    sameSummary.onclick = () => {
+      if (sameContainer.style.display === "none") {
+        sameContainer.style.display = "block";
+        sameSummary.textContent = `... ${diff.same.length} unchanged fields (click to collapse)`;
+      } else {
+        sameContainer.style.display = "none";
+        sameSummary.textContent = `... ${diff.same.length} unchanged fields (click to expand)`;
+      }
+    };
+
+    leftPane.appendChild(sameSummary);
+    leftPane.appendChild(sameContainer);
+  }
+
+  const summaryText = `${diff.added.length} added, ${diff.removed.length} removed, ${diff.changed.length} changed, ${diff.same.length} unchanged`;
+
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:1000px;width:95%">
+      <div class="modal-title">Diff Viewer</div>
+      <div class="modal-body">
+        <div style="font-size:12px;color:var(--dim);margin-bottom:12px">${summaryText}</div>
+        <div class="diff-container" id="diffContainer"></div>
+      </div>
+      <div class="modal-buttons">
+        <button id="closeDiffModal">Close</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  modal.querySelector("#diffContainer").appendChild(leftPane);
+  modal.querySelector("#diffContainer").appendChild(rightPane);
+
+  modal.onclick = (e) => {
+    if (e.target === modal) {
+      document.body.removeChild(modal);
+    }
+  };
+
+  modal.querySelector("#closeDiffModal").onclick = () => {
+    document.body.removeChild(modal);
+  };
+}
+
+// === Replay Mode ===
+
+function parseCSV(text) {
+  const lines = text.trim().split('\n');
+  if (lines.length < 2) return null;
+
+  const header = lines[0].split(',');
+  const rows = [];
+
+  // Find column indices
+  const timeIdx = header.indexOf('time');
+  const epochIdx = header.indexOf('epoch');
+  const eventIdx = header.indexOf('event');
+  const pullIdIdx = header.indexOf('pull_id');
+  const eventDataIdx = header.indexOf('event_data');
+
+  // Parameter columns start after event columns
+  const paramStart = Math.max(timeIdx, epochIdx, eventIdx, pullIdIdx, eventDataIdx) + 1;
+  const params = header.slice(paramStart);
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',');
+    if (cols.length < header.length) continue;
+
+    const row = {
+      time: cols[timeIdx],
+      epoch: parseFloat(cols[epochIdx]),
+      event: cols[eventIdx] || null,
+      pull_id: cols[pullIdIdx] || null,
+      event_data: cols[eventDataIdx] ? JSON.parse(cols[eventDataIdx]) : {},
+      values: {}
+    };
+
+    // Parse parameter values
+    for (let j = 0; j < params.length; j++) {
+      const val = cols[paramStart + j];
+      if (val !== '') {
+        row.values[params[j]] = parseFloat(val);
+      }
+    }
+
+    rows.push(row);
+  }
+
+  return { header: params, rows };
+}
+
+function loadReplayFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const parsed = parseCSV(e.target.result);
+    if (!parsed) {
+      $('replaystatus').textContent = 'Failed to parse CSV file';
+      return;
+    }
+
+    replayData = parsed;
+    replayIndex = 0;
+    replayPlaying = false;
+
+    // Set up state for replay with proper labels from PARAM_LABELS
+    state.channels = parsed.header.map(id => {
+      const info = PARAM_LABELS[id] || { label: id, unit: '' };
+      return {
+        id,
+        label: info.label,
+        group: 'Replay',
+        unit: info.unit,
+        graph: true
+      };
+    });
+
+    // Extract events
+    const events = parsed.rows.filter(r => r.event);
+
+    $('replaystatus').innerHTML = `<span style="color:var(--ok)">✓ Loaded ${parsed.rows.length} samples, ${events.length} events</span>`;
+    $('replaycontrols').style.display = '';
+    $('replayprogress').max = parsed.rows.length - 1;
+
+    // Show event list
+    displayReplayEvents(events);
+
+    // Initialize charts for replay
+    charted = parsed.header.slice(0, 6); // Chart first 6 params by default
+    buildTiles();
+    buildCharts();
+  };
+  reader.readAsText(file);
+}
+
+function displayReplayEvents(events) {
+  const box = $('replayevents');
+  if (events.length === 0) {
+    box.innerHTML = '<div class="muted" style="font-size:11px">No events in recording</div>';
+    return;
+  }
+
+  box.innerHTML = '<div style="font-size:11px;color:var(--dim);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.05em">Events</div>';
+
+  for (const evt of events) {
+    const marker = document.createElement('div');
+    marker.className = `event-marker ${evt.event}`;
+
+    let eventLabel = evt.event.replace(/_/g, ' ');
+    let eventDataStr = '';
+    if (Object.keys(evt.event_data).length > 0) {
+      eventDataStr = `<span class="event-data">${JSON.stringify(evt.event_data)}</span>`;
+    }
+
+    marker.innerHTML = `
+      <span class="event-time">${evt.time}</span>
+      <span class="event-label">${eventLabel}</span>
+      ${eventDataStr}
+    `;
+
+    marker.onclick = () => {
+      jumpToEvent(evt);
+    };
+
+    box.appendChild(marker);
+  }
+}
+
+function jumpToEvent(evt) {
+  // Find index of this event
+  const idx = replayData.rows.findIndex(r => r.epoch === evt.epoch);
+  if (idx >= 0) {
+    replayIndex = idx;
+    rebuildChartHistoryToIndex(idx);
+    updateReplayFrame();
+  }
+}
+
+function rebuildChartHistoryToIndex(targetIdx) {
+  // Properly clear all chart data
+  for (const cv of document.querySelectorAll("canvas")) {
+    if (cv.__pts) {
+      cv.__pts.length = 0; // Clear array in place
+    }
+  }
+
+  // Clear sample times
+  sampleTimes.length = 0;
+
+  // Rebuild history: add last 200 samples leading up to target point
+  const startIdx = Math.max(0, targetIdx - 200);
+  for (let i = startIdx; i <= targetIdx; i++) {
+    const row = replayData.rows[i];
+    const t = row.epoch;
+
+    // Add to sample times
+    sampleTimes.push(t);
+    if (sampleTimes.length > 200) sampleTimes.shift();
+
+    // Push to each channel's chart
+    for (const ch of state.channels) {
+      const cv = document.querySelector(`canvas[data-id="${ch.id}"]`);
+      if (!cv || !cv.__pts) continue;
+
+      const val = row.values[ch.id];
+      if (val !== undefined) {
+        cv.__pts.push({ t, v: val });
+        if (cv.__pts.length > 200) cv.__pts.shift();
+      }
+    }
+  }
+
+  redraw();
+}
+
+function playReplay() {
+  if (!replayData) return;
+  replayPlaying = true;
+  $('replaybtn').disabled = true;
+  $('replaypausebtn').disabled = false;
+
+  const fps = 10; // 10 Hz replay
+  const interval = 1000 / fps / replaySpeed;
+
+  replayTimer = setInterval(() => {
+    if (replayIndex >= replayData.rows.length - 1) {
+      pauseReplay();
+      return;
+    }
+
+    replayIndex++;
+    updateReplayFrame();
+  }, interval);
+}
+
+function pauseReplay() {
+  replayPlaying = false;
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
+  $('replaybtn').disabled = false;
+  $('replaypausebtn').disabled = true;
+}
+
+function stopReplay() {
+  pauseReplay();
+  replayIndex = 0;
+  updateReplayFrame();
+}
+
+function updateReplayFrame() {
+  if (!replayData || replayIndex >= replayData.rows.length) return;
+
+  const row = replayData.rows[replayIndex];
+
+  // Update progress slider
+  $('replayprogress').value = replayIndex;
+
+  // Update time display
+  const totalTime = replayData.rows[replayData.rows.length - 1].epoch - replayData.rows[0].epoch;
+  const currentTime = row.epoch - replayData.rows[0].epoch;
+  $('replaytime').textContent = `${row.time} (${currentTime.toFixed(1)}s / ${totalTime.toFixed(1)}s)`;
+
+  // Push sample to charts
+  pushSample(row.values);
+  redraw();
+
+  // Update tiles
+  for (const ch of state.channels) {
+    const tile = $("tile" + ch.id);
+    if (!tile) continue;
+    const val = row.values[ch.id];
+    if (val !== undefined) {
+      tile.querySelector(".val").textContent = val.toFixed(ch.id.startsWith('P') ? 0 : 1);
+    }
+  }
+
+  // Show event if present
+  const evtBox = $('events');
+  if (row.event) {
+    evtBox.innerHTML = `<span style="color:var(--accent)">● ${row.event} ${JSON.stringify(row.event_data)}</span>`;
+    evtBox.style.display = '';
+  } else {
+    evtBox.style.display = 'none';
+  }
+}
+
+// === Coding Functions ===
+
+async function readCoding() {
+  const addrHex = $("codingmodule").value;
+  if (!addrHex) {
+    $("codingstatus").textContent = "Please select a module first";
+    return;
+  }
+
+  $("codingstatus").innerHTML = '<span style="color:var(--dim)">Reading coding...</span>';
+  $("codingdata").style.display = "none";
+
+  try {
+    const r = await api(`/api/coding?addr=${addrHex}`);
+    if (r.error) {
+      $("codingstatus").innerHTML = `<span style="color:var(--err)">${r.error}</span>`;
+      return;
+    }
+
+    displayCoding(r);
+  } catch (e) {
+    $("codingstatus").innerHTML = `<span style="color:var(--err)">Failed: ${e.message}</span>`;
+  }
+}
+
+// Store current coding for editing
+let currentCoding = null;
+let codingModified = false;
+
+function displayCoding(data) {
+  $("codingstatus").innerHTML = `<span style="color:var(--ok)">✓ Read from ${data.module}</span>`;
+  $("codingdata").style.display = "";
+
+  const box = $("codingdata");
+  box.innerHTML = "";
+
+  // Store current coding for editing
+  currentCoding = {
+    addr: data.addr,
+    module: data.module,
+    raw: data.raw,
+    decoded: JSON.parse(JSON.stringify(data.decoded)), // Deep copy
+    has_decoder: data.has_decoder
+  };
+  codingModified = false;
+
+  if (!data.has_decoder) {
+    box.innerHTML = `
+      <div class="muted" style="margin-bottom:8px">No decoder available for this module</div>
+      <div class="coding-raw">Raw: ${data.raw}</div>
+    `;
+    return;
+  }
+
+  const decoded = data.decoded;
+
+  // Add manual edit mode toggle
+  const editModeDiv = document.createElement("div");
+  editModeDiv.style.cssText = "margin-bottom:12px;display:flex;align-items:center;gap:8px";
+  editModeDiv.innerHTML = `
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+      <input type="checkbox" id="codingEditMode" style="cursor:pointer">
+      <span>Manual Edit Mode</span>
+    </label>
+    <span class="muted" style="font-size:11px">(click bit values to toggle)</span>
+  `;
+  box.appendChild(editModeDiv);
+
+  // Display each byte
+  for (let i = 0; i < decoded.bytes.length; i++) {
+    const byte = decoded.bytes[i];
+    const div = document.createElement("div");
+    div.className = "coding-byte";
+
+    let content = `
+      <div class="coding-byte-header">Byte ${i}</div>
+      <div class="coding-byte-name">${byte.name}</div>
+    `;
+
+    if (byte.type === "enum") {
+      content += `<div class="coding-byte-value">${byte.value}</div>`;
+    } else if (byte.type === "bitfield") {
+      for (const [bitName, bitInfo] of Object.entries(byte.bits)) {
+        content += `
+          <div class="coding-bit">
+            <span class="coding-bit-name">${bitName}</span>
+            <span class="coding-bit-value coding-bit-toggle"
+                  data-byte="${i}"
+                  data-bit="${bitInfo.bit}"
+                  data-current="${bitInfo.raw}"
+                  style="cursor:pointer;padding:2px 6px;border-radius:2px">${bitInfo.value}</span>
+          </div>
+        `;
+      }
+    }
+
+    content += `<div style="font-size:10px;color:var(--dim);margin-top:4px">Raw: ${byte.raw}</div>`;
+
+    div.innerHTML = content;
+    box.appendChild(div);
+  }
+
+  // Show full raw hex at bottom
+  const rawDiv = document.createElement("div");
+  rawDiv.className = "coding-raw";
+  rawDiv.id = "codingRawDisplay";
+  rawDiv.textContent = `Full coding: ${data.raw}`;
+  box.appendChild(rawDiv);
+
+  // Apply changes button (initially hidden)
+  const applyDiv = document.createElement("div");
+  applyDiv.id = "codingApplyDiv";
+  applyDiv.style.cssText = "margin-top:12px;display:none";
+  applyDiv.innerHTML = `
+    <button id="applyCodingChanges" style="background:var(--warn);width:100%">
+      Apply Coding Changes (creates backup)
+    </button>
+    <div id="codingApplyResult" style="margin-top:8px"></div>
+  `;
+  box.appendChild(applyDiv);
+
+  // Set up bit toggle handlers
+  const editMode = $("codingEditMode");
+  const toggles = box.querySelectorAll(".coding-bit-toggle");
+
+  editMode.onchange = () => {
+    for (const toggle of toggles) {
+      if (editMode.checked) {
+        toggle.style.background = "var(--panel)";
+      } else {
+        toggle.style.background = "";
+      }
+    }
+  };
+
+  for (const toggle of toggles) {
+    toggle.onclick = () => {
+      if (!editMode.checked) {
+        return; // Edit mode not enabled
+      }
+
+      const byteIdx = parseInt(toggle.dataset.byte);
+      const bitIdx = parseInt(toggle.dataset.bit);
+      const currentVal = parseInt(toggle.dataset.current);
+      const newVal = currentVal === 0 ? 1 : 0;
+
+      // Update the bit in our stored coding
+      toggleCodingBit(byteIdx, bitIdx, newVal);
+
+      // Update UI
+      toggle.dataset.current = newVal;
+      const bitInfo = currentCoding.decoded.bytes[byteIdx].bits[Object.keys(currentCoding.decoded.bytes[byteIdx].bits)[bitIdx]];
+      toggle.textContent = bitInfo.values[newVal];
+      toggle.style.background = "var(--accent)";
+
+      codingModified = true;
+      $("codingApplyDiv").style.display = "";
+      updateRawCodingDisplay();
+    };
+  }
+
+  // Load and display presets for this module
+  loadCodingPresets(data.addr, data.module);
+
+  // Set up apply button
+  $("applyCodingChanges").onclick = () => applyManualCodingChanges();
+}
+
+function toggleCodingBit(byteIdx, bitIdx, newValue) {
+  // Parse current raw hex
+  const bytes = [];
+  for (let i = 0; i < currentCoding.raw.length; i += 2) {
+    bytes.push(parseInt(currentCoding.raw.substr(i, 2), 16));
+  }
+
+  // Toggle the bit
+  if (newValue === 1) {
+    bytes[byteIdx] |= (1 << bitIdx);
+  } else {
+    bytes[byteIdx] &= ~(1 << bitIdx);
+  }
+
+  // Update raw hex
+  currentCoding.raw = bytes.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join('');
+}
+
+function updateRawCodingDisplay() {
+  const rawDiv = $("codingRawDisplay");
+  rawDiv.textContent = `Full coding: ${currentCoding.raw}`;
+  rawDiv.style.color = "var(--warn)";
+}
+
+async function applyManualCodingChanges() {
+  const btn = $("applyCodingChanges");
+  const resultDiv = $("codingApplyResult");
+
+  btn.disabled = true;
+  btn.textContent = "Applying...";
+
+  try {
+    // Convert hex string to bytes for API
+    const codingBytes = [];
+    for (let i = 0; i < currentCoding.raw.length; i += 2) {
+      codingBytes.push(parseInt(currentCoding.raw.substr(i, 2), 16));
+    }
+
+    const result = await api("/api/coding/write", {
+      addr: currentCoding.addr,
+      coding_hex: currentCoding.raw,
+      confirm: true,
+      user_note: "Manual coding edit"
+    });
+
+    if (result.error) {
+      resultDiv.innerHTML = `<div style="color:var(--err)">Error: ${result.error}</div>`;
+      btn.disabled = false;
+      btn.textContent = "Apply Coding Changes";
+    } else if (result.success) {
+      resultDiv.innerHTML = `
+        <div style="color:var(--ok)">✓ Coding applied successfully!</div>
+        <div class="muted" style="margin-top:4px">Backup: ${result.backup_path}</div>
+      `;
+      btn.textContent = "Re-read Coding";
+      btn.onclick = () => {
+        $("readcoding").click();
+      };
+    } else {
+      resultDiv.innerHTML = `
+        <div style="color:var(--warn)">⚠️ Verification failed: ${result.error}</div>
+        <div class="muted" style="margin-top:4px">Backup: ${result.backup_path}</div>
+      `;
+      btn.disabled = false;
+      btn.textContent = "Apply Coding Changes";
+    }
+  } catch (err) {
+    resultDiv.innerHTML = `<div style="color:var(--err)">Error: ${err.message}</div>`;
+    btn.disabled = false;
+    btn.textContent = "Apply Coding Changes";
+  }
+}
+
+async function loadCodingPresets(addr, moduleName) {
+  try {
+    const r = await api(`/api/coding/presets?addr=${addr}`);
+    if (!r.presets || Object.keys(r.presets).length === 0) {
+      return;
+    }
+
+    const box = $("codingdata");
+    const presetsDiv = document.createElement("div");
+    presetsDiv.style.marginTop = "20px";
+    presetsDiv.innerHTML = '<div style="font-weight:bold;margin-bottom:8px">Available Presets:</div>';
+
+    const presetsGrid = document.createElement("div");
+    presetsGrid.style.display = "grid";
+    presetsGrid.style.gridTemplateColumns = "repeat(auto-fill, minmax(250px, 1fr))";
+    presetsGrid.style.gap = "8px";
+
+    for (const [presetId, preset] of Object.entries(r.presets)) {
+      const presetBtn = document.createElement("button");
+      presetBtn.style.textAlign = "left";
+      presetBtn.style.padding = "8px";
+      presetBtn.style.fontSize = "11px";
+      presetBtn.innerHTML = `
+        <div style="font-weight:bold;margin-bottom:2px">${preset.name}</div>
+        <div class="muted">${preset.description}</div>
+      `;
+      presetBtn.onclick = () => showPresetConfirm(addr, moduleName, presetId, preset);
+      presetsGrid.appendChild(presetBtn);
+    }
+
+    presetsDiv.appendChild(presetsGrid);
+    box.appendChild(presetsDiv);
+  } catch (err) {
+    console.error("Failed to load presets:", err);
+  }
+}
+
+function showPresetConfirm(addr, moduleName, presetId, preset) {
+  const modal = document.createElement("div");
+  modal.style.cssText = "position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center";
+
+  const box = document.createElement("div");
+  box.style.cssText = "background:var(--bg);padding:20px;border-radius:4px;max-width:600px;max-height:80vh;overflow-y:auto";
+
+  box.innerHTML = `
+    <h3 style="margin-top:0">Apply Preset: ${preset.name}</h3>
+    <p class="muted">${preset.description}</p>
+    <div style="margin:16px 0">
+      <strong>Module:</strong> ${moduleName} (0x${addr.toString(16).toUpperCase()})
+    </div>
+    <div id="presetchanges" style="margin:16px 0">Loading preview...</div>
+    <p style="color:var(--warn)">⚠️ This will modify module configuration. A backup will be created automatically.</p>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button id="presetconfirm" style="flex:1" disabled>Apply Preset</button>
+      <button id="presetcancel" style="flex:1">Cancel</button>
+    </div>
+    <div id="presetresult" style="margin-top:16px"></div>
+  `;
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+
+  // Fetch preview of changes
+  api(`/api/coding/preview?addr=${addr}&preset_id=${presetId}`).then(preview => {
+    const changesDiv = $("presetchanges");
+    if (preview.changes && preview.changes.length > 0) {
+      let html = '<div style="font-weight:bold;margin-bottom:8px">Changes:</div>';
+      for (const change of preview.changes) {
+        html += `
+          <div style="margin:4px 0;padding:8px;background:var(--panel);border-radius:4px">
+            <div style="font-weight:bold">${change.field}</div>
+            <div style="display:flex;gap:8px;margin-top:4px;font-size:11px">
+              <span style="color:var(--err)">− ${change.before}</span>
+              <span style="color:var(--ok)">+ ${change.after}</span>
+            </div>
+          </div>
+        `;
+      }
+      changesDiv.innerHTML = html;
+    } else {
+      changesDiv.innerHTML = '<div class="muted">No changes (setting already has this value)</div>';
+    }
+    $("presetconfirm").disabled = false;
+  }).catch(err => {
+    $("presetchanges").innerHTML = `<div style="color:var(--err)">Failed to load preview: ${err.message}</div>`;
+  });
+
+  $("presetcancel").onclick = () => document.body.removeChild(modal);
+  $("presetconfirm").onclick = async () => {
+    const btn = $("presetconfirm");
+    btn.disabled = true;
+    btn.textContent = "Applying...";
+
+    try {
+      const result = await api("/api/coding/apply", {
+        addr,
+        preset_id: presetId,
+        confirm: true
+      });
+
+      if (result.error) {
+        $("presetresult").innerHTML = `<div style="color:var(--err)">Error: ${result.error}</div>`;
+        btn.disabled = false;
+        btn.textContent = "Apply Preset";
+      } else if (result.success) {
+        $("presetresult").innerHTML = `
+          <div style="color:var(--ok)">✓ Preset applied successfully!</div>
+          <div class="muted" style="margin-top:8px">Backup saved to: ${result.backup_path}</div>
+        `;
+        btn.textContent = "Close";
+        btn.onclick = () => {
+          document.body.removeChild(modal);
+          // Re-read coding to show updated values
+          $("readcoding").click();
+        };
+      } else {
+        $("presetresult").innerHTML = `
+          <div style="color:var(--warn)">⚠️ Verification failed: ${result.error}</div>
+          <div class="muted" style="margin-top:8px">Backup saved to: ${result.backup_path}</div>
+        `;
+        btn.disabled = false;
+        btn.textContent = "Apply Preset";
+      }
+    } catch (err) {
+      $("presetresult").innerHTML = `<div style="color:var(--err)">Error: ${err.message}</div>`;
+      btn.disabled = false;
+      btn.textContent = "Apply Preset";
+    }
+  };
+}
+
+function updateHealth(health) {
+  console.log("updateHealth called with:", health);
+  const grid = $("healthgrid");
+
+  // Always show same set of boxes (stable layout)
+  const allIndicators = [
+    {key: "gear", label: "Gear", default: {color: "blue", text: "—", value: ""}},
+    {key: "charging", label: "Charging", default: {color: "blue", text: "—", value: ""}},
+    {key: "coolant", label: "Coolant", default: {color: "blue", text: "—", value: ""}},
+    {key: "iat", label: "Intake Air", default: {color: "blue", text: "—", value: ""}},
+    {key: "fuel", label: "Fuel Trim", default: {color: "blue", text: "—", value: ""}},
+    {key: "maf", label: "Airflow", default: {color: "blue", text: "—", value: ""}},
+    {key: "vanos", label: "VANOS", default: {color: "blue", text: "—", value: ""}},
+    {key: "timing", label: "Knock", default: {color: "blue", text: "—", value: ""}}
+  ];
+
+  grid.innerHTML = "";
+  for (const ind of allIndicators) {
+    const h = health[ind.key] || ind.default;
+    const item = document.createElement("div");
+    item.className = "health-item";
+    item.innerHTML = `
+      <div class="health-dot ${h.color}"></div>
+      <div class="health-text">
+        <div class="health-label">${ind.label}</div>
+        <div class="health-value">${h.text}<span class="health-metric">${h.value || ""}</span></div>
+      </div>`;
+    grid.appendChild(item);
+  }
+}
+
+function buildTiles() {
+  const box = $("tilegroups");
+  box.innerHTML = "";
+  const groups = [];
+  for (const ch of state.channels || []) {
+    if (!groups.includes(ch.group || "Data")) groups.push(ch.group || "Data");
+  }
+  for (const g of groups) {
+    const gt = document.createElement("div");
+    gt.className = "group-title";
+    gt.textContent = g;
+    box.appendChild(gt);
+    const wrap = document.createElement("div");
+    wrap.className = "tiles";
+    for (const ch of state.channels.filter(c => (c.group || "Data") === g)) {
+      const d = document.createElement("div");
+      d.className = "tile" + (charted.includes(ch.id) ? " charted" : "");
+      d.id = "tilebox_" + ch.id;
+      d.innerHTML = `<div class="v" id="tile_${ch.id}">—</div>
+                     <div class="l">${ch.label}${ch.unit ? " (" + ch.unit + ")" : ""}</div>`;
+      d.onclick = () => toggleChart(ch.id);
+      wrap.appendChild(d);
+    }
+    box.appendChild(wrap);
+  }
+}
+
+function toggleChart(id) {
+  const i = charted.indexOf(id);
+  if (i >= 0) charted.splice(i, 1); else charted.push(id);
+  const t = $("tilebox_" + id);
+  if (t) t.classList.toggle("charted", charted.includes(id));
+  buildCharts();
+}
+
+function buildCharts() {
+  const box = $("charts");
+  box.innerHTML = "";
+  for (const id of charted) {
+    const ch = chanById(id);
+    const lbl = document.createElement("div");
+    lbl.className = "chart-label";
+    lbl.innerHTML = `<b>${ch ? ch.label : id}</b>${ch && ch.unit ? " (" + ch.unit + ")" : ""}`;
+    const cv = document.createElement("canvas");
+    cv.id = "chart_" + id;
+    box.appendChild(lbl);
+    box.appendChild(cv);
+  }
+  redraw();
+}
+
+// ---- history + charts ----
+const hist = {};
+function pushSample(values) {
+  const tnow = Date.now() / 1000;
+  sampleTimes.push(tnow);
+  while (sampleTimes.length && sampleTimes[0] < tnow - 5) sampleTimes.shift();
+  $("ratestat").textContent = (sampleTimes.length / 5).toFixed(1) + " Hz";
+  for (const [k, v] of Object.entries(values)) {
+    const num = Number(v);
+    if (Number.isFinite(num)) {  // string states (e.g. vanos_state) skip history
+      (hist[k] = hist[k] || []).push({ t: tnow, v: num });
+      const cut = tnow - 120;
+      while (hist[k].length && hist[k][0].t < cut) hist[k].shift();
+    }
+    const el = $("tile_" + k);
+    if (el) {
+      const ch = chanById(k);
+      el.textContent = (ch && ch.unit === "V" && Number.isFinite(num))
+        ? num.toFixed(1) : v;
+      if (k === "vanos_state") {
+        el.style.color = v === "FAULT" ? "var(--err)"
+          : v === "ENGAGED" ? "var(--ok)" : "";
+        el.style.fontSize = "18px";
+      }
+    }
+  }
+  redraw();
+}
+
+function redraw() {
+  for (const id of charted) {
+    const cv = $("chart_" + id);
+    if (cv) drawChart(cv, hist[id] || []);
+  }
+}
+
+function drawChart(cv, pts) {
+  const ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth * devicePixelRatio;
+  const H = cv.height = 130 * devicePixelRatio;
+  ctx.clearRect(0, 0, W, H);
+  if (pts.length < 2) return;
+  const t1 = pts[pts.length - 1].t, t0 = t1 - 120;
+  let lo = Infinity, hi = -Infinity;
+  for (const p of pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; }
+  if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
+  const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
+  ctx.strokeStyle = "#313945"; ctx.lineWidth = 1;
+  ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+  ctx.fillStyle = "#8b97a5";
+  for (let i = 0; i <= 3; i++) {
+    const y = H * i / 3;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    const val = hi - (hi - lo) * i / 3;
+    ctx.fillText(val.toFixed(Math.abs(hi - lo) < 20 ? 1 : 0),
+                 6 * devicePixelRatio, y + 12 * devicePixelRatio);
+  }
+  ctx.strokeStyle = "#4da3ff"; ctx.lineWidth = 2 * devicePixelRatio;
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const x = (pts[i].t - t0) / 120 * W;
+    const y = H - (pts[i].v - lo) / (hi - lo) * H;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+}
+
+// ---- live stream ----
+$("livebtn").onclick = () => {
+  if (es) { es.close(); es = null;
+    $("livebtn").textContent = "Start live";
+    $("livestat").textContent = "stopped"; return; }
+  es = new EventSource("/api/live");
+  $("livebtn").textContent = "Stop live";
+  $("livestat").textContent = "streaming…";
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    if (d.ok) {
+      pushSample(d.values);
+      $("livestat").textContent = d.rec !== null && d.rec !== undefined
+        ? `recording: ${d.rec} rows` : "streaming";
+      // Show/hide pull indicator
+      const pullBadge = $("pullbadge");
+      if (d.pull) {
+        pullBadge.textContent = `🔴 PULL ${d.pull_num || ""}`;
+        pullBadge.style.display = "";
+      } else {
+        pullBadge.style.display = "none";
+      }
+      // Update health panel
+      updateHealth(d.health || {});
+      // VANOS command/response events (also persisted to vanos_events.log)
+      if (d.vanos_event) {
+        const ev = d.vanos_event;
+        const el = $("events");
+        const line = document.createElement("div");
+        const isFault = ev.event === "vanos_fault";
+        line.style.color = isFault ? "var(--err)" : "var(--ok)";
+        line.textContent = `${ev.time}  ${isFault
+          ? "⚠ VANOS FAULT: commanded, cam not moving"
+          : "✓ VANOS engaged"}  (rpm ${ev.rpm ?? "?"}, cam ${ev.cam_pos_e11 ?? "?"}°, load ${ev.load ?? "?"})`;
+        el.prepend(line);
+        while (el.childNodes.length > 6) el.removeChild(el.lastChild);
+      }
+    } else $("livestat").textContent = "no data (ignition on?)";
+  };
+  es.onerror = () => { $("livestat").textContent = "stream error"; };
+};
+
+// ---- recording ----
+$("recbtn").onclick = async () => {
+  recOn = !recOn;
+  const r = await api("/api/record", { on: recOn });
+  recOn = r.on;
+  $("recbtn").textContent = recOn ? "⏹ Stop recording" : "⏺ Record to CSV";
+  $("recbtn").classList.toggle("rec-on", recOn);
+  $("recbadge").style.display = recOn ? "" : "none";
+  if (!recOn && r.path)
+    $("livestat").textContent = `saved ${r.rows} rows -> ${r.path.split("/").pop()}`;
+  if (recOn && !es) $("livebtn").click();  // recording implies live
+};
+
+// ---- SIA reset ----
+$("siabtn").onclick = async () => {
+  if (!confirm("Reset the OIL SERVICE interval on the cluster?\n\nDo this only after an actual oil change."))
+    return;
+  $("siastat").textContent = "sending…";
+  const r = await api("/api/sia-reset", { confirm: true, kind: 1 });
+  $("siastat").textContent = r.ok
+    ? "✓ cluster acknowledged — check the service display (ignition cycle may be needed)"
+    : `rejected: ${r.status || r.error}`;
+};
+
+// ---- modules & faults ----
+function hex(a) { return "0x" + a.toString(16).toUpperCase().padStart(2, "0"); }
+
+function modCard(m) {
+  const div = document.createElement("div");
+  div.className = "mod"; div.id = "mod" + m.addr;
+  div.innerHTML = `
+    <div class="mod-head" onclick="toggleFaults(${m.addr})">
+      <span class="mod-addr">${hex(m.addr)}</span>
+      <span class="mod-name">${m.name}</span>
+      <span class="pill unk" id="pill${m.addr}">?</span>
+    </div>
+    <div class="faults" id="faults${m.addr}"></div>`;
+  return div;
+}
+
+window.toggleFaults = async (addr) => {
+  const el = $("faults" + addr);
+  if (el.style.display === "block") { el.style.display = "none"; return; }
+  el.style.display = "block";
+  if (!el.dataset.loaded) await readFaults(addr);
+};
+
+async function readFaults(addr) {
+  const el = $("faults" + addr);
+  el.style.display = "block";
+  el.innerHTML = `<span class="muted">reading…</span>`;
+  const r = await api("/api/faults", { addr });
+  el.dataset.loaded = "1";
+  const pill = $("pill" + addr);
+  if (!r.ok) {
+    pill.textContent = "!"; pill.className = "pill unk";
+    el.innerHTML = `<span class="muted">${r.error}</span>`;
+    return;
+  }
+  const n = r.entries.length;
+  pill.textContent = n; pill.className = "pill " + (n ? "bad" : "clean");
+  el.innerHTML = "";
+  if (!n) el.innerHTML = `<span class="muted">no faults stored</span>`;
+  for (const f of r.entries) {
+    const d = document.createElement("div");
+    d.className = "fault";
+    d.innerHTML = `<code>${f.code}</code>
+      <span class="txt">${f.text || "(no text — raw: " + f.raw + ")"}</span>
+      ${f.status ? `<span class="bits">${f.status}</span>` : ""}`;
+    el.appendChild(d);
+  }
+  const act = document.createElement("div");
+  act.className = "fault-actions";
+  act.innerHTML = `
+    <button onclick="readFaults(${addr})">Re-read</button>` + (n ? `
+    <button class="danger" onclick="clearFaults(${addr})">Clear fault memory</button>` : "");
+  el.appendChild(act);
+}
+
+window.readFaults = readFaults;
+window.clearFaults = async (addr) => {
+  if (!confirm(`Clear fault memory of ${hex(addr)}?\n\nA snapshot is saved to fault_snapshots.log first. Faults with a still-present cause will come back.`))
+    return;
+  const el = $("faults" + addr);
+  el.innerHTML = `<span class="muted">clearing…</span>`;
+  const r = await api("/api/clear", { addr, confirm: true });
+  el.dataset.loaded = "";
+  if (r.error) { el.innerHTML = `<span class="muted">${r.error}</span>`; return; }
+  await readFaults(addr);
+  loadBackups();  // Refresh backup list after clear
+  const note = document.createElement("div");
+  note.className = "muted";
+  note.textContent = r.success ? "clear verified" : `clear failed: ${r.error || "verification failed"}`;
+  el.prepend(note);
+};
+
+$("scan").onclick = async () => {
+  $("modules").innerHTML = `<div class="muted">scanning…</div>`;
+  const r = await api("/api/scan", {});
+  const box = $("modules");
+  box.innerHTML = "";
+  if (!r.modules || !r.modules.length) {
+    box.innerHTML = `<div class="muted">nothing responded — ignition on?</div>`;
+    return;
+  }
+  for (const m of r.modules) box.appendChild(modCard(m));
+};
+
+$("readall").onclick = async () => {
+  for (const el of document.querySelectorAll(".mod")) {
+    await readFaults(parseInt(el.id.slice(3)));
+  }
+};
+
+$("connect").onclick = async () => {
+  $("conn").textContent = "connecting…";
+  setState(await api("/api/connect", { protocol: $("protosel").value }));
+};
+
+// Dashboard quick actions
+$("dashscan").onclick = async () => {
+  $("scan").click();  // Trigger main scan button
+};
+
+$("dashfaults").onclick = async () => {
+  $("readall").click();  // Trigger read all faults button
+};
+
+$("dashlive").onclick = async () => {
+  $("livebtn").click();  // Trigger live data button
+};
+
+// Snapshot create button
+$("snapcreate").onclick = async () => {
+  const desc = $("snapdesc").value.trim() || "manual";
+  if (!confirm(`Create snapshot with description: "${desc}"?\n\nThis will read all modules and save their current state.`)) return;
+
+  $("snapcreate").disabled = true;
+  $("snapcreate").textContent = "Creating...";
+
+  try {
+    const r = await api("/api/snapshot/create", { description: desc });
+    if (r.error) {
+      alert(`Failed to create snapshot: ${r.error}`);
+    } else {
+      alert(`Snapshot created: ${r.id}\n${r.module_count} modules, ${r.total_faults} total faults`);
+      $("snapdesc").value = "";
+      loadSnapshots();
+    }
+  } catch (e) {
+    alert(`Error creating snapshot: ${e.message}`);
+  } finally {
+    $("snapcreate").disabled = false;
+    $("snapcreate").textContent = "📸 Create";
+  }
+};
+
+// ---- Verify DME map (sourced -> car-verified) ----
+$("verifybtn").onclick = async () => {
+  if (!es) {
+    $("verifystat").textContent = "Start live logging on a warm, running engine first.";
+    return;
+  }
+  if (!confirm("Confirm this engine's live values match the physical gauges" +
+      " (coolant vs temp gauge, RPM vs tacho)?\n\nOnly confirm if they agree" +
+      " — this promotes the parameter map to car-verified for this VIN.")) return;
+  $("verifystat").textContent = "checking plausibility…";
+  const r = await api("/api/engine/verify", { confirm: true, note: "user confirmed vs gauges" });
+  if (r.verified) {
+    $("verifystat").innerHTML = '<span style="color:var(--ok)">✓ map car-verified and saved</span>';
+    loadDashboard();
+  } else {
+    $("verifystat").textContent = "not verified: " + (r.blocked_reason || r.error || "unknown");
+  }
+};
+
+// ---- Protocol Explorer: operation database browser ----
+async function loadProtocolExplorer() {
+  const sec = $("protocolsec");
+  if (!state.connected) { sec.style.display = "none"; return; }
+  sec.style.display = "";
+  try {
+    const s = await api("/api/operations/summary");
+    $("opsummary").textContent =
+      `${s.total} operations · ${s.usable_on_car} car-usable · ` +
+      Object.entries(s.by_grade || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+  } catch (e) { $("opsummary").textContent = "operations.json not built"; }
+}
+
+async function loadOps(ecu) {
+  const box = $("opslist");
+  box.innerHTML = '<div class="muted">loading…</div>';
+  const d = await api("/api/operations" + (ecu ? "?ecu=" + ecu : ""));
+  if (d.error) { box.innerHTML = `<div class="muted">${d.error}</div>`; return; }
+  // populate ecu filter once
+  const sel = $("opsecu");
+  if (sel.options.length <= 1 && d.ecus) {
+    for (const e of d.ecus) sel.add(new Option(e, e));
+  }
+  box.innerHTML = "";
+  const gradeColor = { verified: "clean", observed: "unk", "implemented-safe": "clean", documented: "unk", unknown: "bad" };
+  for (const o of d.operations.slice(0, 400)) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;align-items:center;padding:4px 8px;border-bottom:1px solid var(--line);font-size:12px";
+    row.innerHTML =
+      `<span class="pill ${gradeColor[o.grade] || 'unk'}" style="font-size:10px;min-width:70px">${o.grade}</span>` +
+      `<span style="font-family:monospace;min-width:40px;color:var(--dim)">${o.kind}</span>` +
+      `<span style="flex:1">${o.sgbd_job || o.name}</span>` +
+      (o.car_usable ? '<span style="color:var(--ok);font-size:11px">car-usable</span>' : '<span class="muted" style="font-size:11px">gated</span>');
+    box.appendChild(row);
+  }
+}
+
+$("opsecu").onchange = () => loadOps($("opsecu").value || null);
+$("opsload").onclick = () => loadOps($("opsecu").value || null);
+
+// ---- RAM Explorer (live memory viewer + idle-vs-rev diff) ----
+let ramLast = null, ramCapA = null, ramCapB = null;
+
+function showRam() {
+  $("ramsec").style.display = state.connected ? "" : "none";
+}
+
+async function ramReadRange() {
+  const start = parseInt($("ramstart").value, 16);
+  const count = Math.min(64, Math.max(1, parseInt($("ramcount").value) || 16));
+  if (isNaN(start)) { $("ramdump").textContent = "invalid start address"; return; }
+  $("ramdump").textContent = "reading…";
+  const r = await api("/api/ram/read", { start, count });
+  if (r.error) { $("ramdump").textContent = r.error; return null; }
+  ramLast = r.values;
+  // render as a hex grid, 8 bytes per row
+  const addrs = Object.keys(r.values).map(k => parseInt(k, 16)).sort((a, b) => a - b);
+  let out = "";
+  for (let i = 0; i < addrs.length; i += 8) {
+    const row = addrs.slice(i, i + 8);
+    out += "0x" + row[0].toString(16).toUpperCase().padStart(4, "0") + ":  ";
+    out += row.map(a => r.values["0x" + a.toString(16).toUpperCase().padStart(4, "0")]
+      .toString(16).toUpperCase().padStart(2, "0")).join(" ") + "\n";
+  }
+  $("ramdump").textContent = out;
+  return r.values;
+}
+
+$("ramread").onclick = ramReadRange;
+
+document.querySelectorAll(".rampreset").forEach(b => {
+  b.onclick = () => { $("ramstart").value = b.dataset.start; ramReadRange(); };
+});
+
+$("ramcapA").onclick = async () => {
+  const v = await ramReadRange();
+  if (v) { ramCapA = v; updateRamCapStat(); }
+};
+$("ramcapB").onclick = async () => {
+  const v = await ramReadRange();
+  if (v) { ramCapB = v; updateRamCapStat(); }
+};
+function updateRamCapStat() {
+  $("ramcapstat").textContent =
+    `A: ${ramCapA ? "captured" : "—"}  B: ${ramCapB ? "captured" : "—"}`;
+}
+
+$("ramdiff").onclick = async () => {
+  const box = $("ramdiffout");
+  if (!ramCapA || !ramCapB) { box.innerHTML = '<div class="muted">Capture A and B first (e.g. at idle then at ~3000 rpm).</div>'; return; }
+  const r = await api("/api/ram/diff", { a: ramCapA, b: ramCapB, min_delta: 1 });
+  if (r.error) { box.innerHTML = `<div class="muted">${r.error}</div>`; return; }
+  if (!r.length) { box.innerHTML = '<div class="muted">No addresses changed between A and B.</div>'; return; }
+  box.innerHTML = '<div style="font-size:11px;color:var(--dim);margin-bottom:4px">Changed addresses (ranked by magnitude) — candidates for RPM-linked signals:</div>';
+  for (const d of r.slice(0, 20)) {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:10px;padding:3px 8px;border-bottom:1px solid var(--line);font-size:12px;font-family:ui-monospace,monospace";
+    const dir = d.delta > 0 ? "var(--ok)" : "var(--err)";
+    row.innerHTML = `<span style="color:var(--accent);min-width:56px">${d.hex}</span>` +
+      `<span style="color:var(--dim)">${d.a} → ${d.b}</span>` +
+      `<span style="color:${dir}">Δ${d.delta > 0 ? "+" : ""}${d.delta}</span>`;
+    box.appendChild(row);
+  }
+};
+
+// ---- Analysis: compare two drive recordings ----
+async function loadAnalysis() {
+  const sec = $("analysissec");
+  if (!state.connected) { sec.style.display = "none"; return; }
+  sec.style.display = "";
+  try {
+    const recs = await api("/api/recordings");
+    const a = $("cmpA"), b = $("cmpB");
+    if (a.options.length === 0 && recs.length) {
+      for (const r of recs) {
+        a.add(new Option(`${r.name} (${r.rows})`, r.name));
+        b.add(new Option(`${r.name} (${r.rows})`, r.name));
+      }
+      if (recs.length > 1) b.selectedIndex = 1;
+    }
+  } catch (e) { /* recordings optional */ }
+}
+
+$("cmprun").onclick = async () => {
+  const box = $("cmpfindings");
+  const a = $("cmpA").value, b = $("cmpB").value;
+  if (!a || !b) { box.innerHTML = '<div class="muted">pick two recordings</div>'; return; }
+  box.innerHTML = '<div class="muted">comparing…</div>';
+  const r = await api("/api/compare", { a, b });
+  if (r.error) { box.innerHTML = `<div class="muted">${r.error}</div>`; return; }
+  if (!r.findings || !r.findings.length) {
+    box.innerHTML = '<div class="muted">No significant differences (>5%) between the runs.</div>';
+    return;
+  }
+  const mark = { improvement: ["var(--ok)", "▲"], regression: ["var(--err)", "▼"], note: ["var(--dim)", "•"] };
+  box.innerHTML = "";
+  for (const f of r.findings) {
+    const [color, sym] = mark[f.type] || ["var(--fg)", "·"];
+    const d = document.createElement("div");
+    d.style.cssText = "padding:6px 8px;margin-bottom:4px;background:var(--panel2);border-left:3px solid " + color + ";border-radius:4px;font-size:12px";
+    d.innerHTML = `<span style="color:${color};font-weight:700">${sym} ${f.subsystem}</span> — ${f.description}`;
+    box.appendChild(d);
+  }
+};
+
+// ---- Developer Mode raw console ----
+document.querySelectorAll(".devpreset").forEach(b => {
+  b.onclick = () => { $("devaddr").value = b.dataset.addr; $("devpayload").value = b.dataset.pl; };
+});
+
+$("devsend").onclick = async () => {
+  const box = $("devresponse");
+  const addr = parseInt($("devaddr").value, 16);
+  const payload = $("devpayload").value.trim().split(/\s+/).filter(x => x);
+
+  if (!payload.length) {
+    box.innerHTML = '<div style="color:var(--err)">Enter payload bytes (hex)</div>';
+    return;
+  }
+
+  box.innerHTML = '<div class="muted">sending...</div>';
+
+  try {
+    const r = await api("/api/dev/raw", { addr, payload });
+
+    if (r.blocked) {
+      box.innerHTML = `<div style="color:var(--err);padding:6px;border-left:3px solid var(--err);background:var(--panel)">
+        ❌ <strong>BLOCKED</strong><br>${r.reason}
+      </div>`;
+      return;
+    }
+
+    if (r.demo) {
+      box.innerHTML = `<div style="color:var(--ok);padding:6px;border-left:3px solid var(--ok);background:var(--panel)">
+        ✓ <strong>DEMO MODE</strong><br>${r.note}<br><br>
+        Request: ${r.request.join(' ')}
+      </div>`;
+      return;
+    }
+
+    if (r.ok && r.response) {
+      const respHex = r.response.map(b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`).join(' ');
+      const respAscii = r.response.map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.').join('');
+      box.innerHTML = `<div style="color:var(--ok);padding:6px;border-left:3px solid var(--ok);background:var(--panel)">
+        ✓ <strong>SUCCESS</strong><br><br>
+        <strong>Request:</strong> ${r.request.map(b => `0x${b.toString(16).toUpperCase().padStart(2, '0')}`).join(' ')}<br>
+        <strong>Response:</strong> ${respHex}<br>
+        <strong>ASCII:</strong> ${respAscii}
+      </div>`;
+    } else {
+      box.innerHTML = `<div style="color:var(--err)">Error: ${r.error || 'unknown'}</div>`;
+    }
+  } catch (e) {
+    box.innerHTML = `<div style="color:var(--err)">Exception: ${e.message}</div>`;
+  }
+};
+
+// ---- Replay controls ----
+$("replayfile").onchange = (e) => {
+  const file = e.target.files[0];
+  if (file) loadReplayFile(file);
+};
+
+$("replaybtn").onclick = () => playReplay();
+$("replaypausebtn").onclick = () => pauseReplay();
+$("replaystopbtn").onclick = () => stopReplay();
+
+$("replayspeed").onchange = (e) => {
+  replaySpeed = parseFloat(e.target.value);
+  if (replayPlaying) {
+    pauseReplay();
+    playReplay(); // Restart with new speed
+  }
+};
+
+$("replayprogress").oninput = (e) => {
+  if (replayPlaying) pauseReplay();
+  replayIndex = parseInt(e.target.value);
+  rebuildChartHistoryToIndex(replayIndex);
+  updateReplayFrame();
+};
+
+// ---- Coding controls ----
+$("readcoding").onclick = () => readCoding();
+
+// ---- Adaptations controls ----
+$("adaptload").onclick = async () => {
+  const module = $("adaptmodule").value;
+  const status = $("adaptstatus");
+  const list = $("adaptlist");
+
+  if (!module) {
+    status.textContent = "Select a module first.";
+    list.style.display = "none";
+    return;
+  }
+
+  status.textContent = "Loading adaptations...";
+  list.style.display = "none";
+
+  try {
+    const r = await api(`/api/adaptations?module=${module}`);
+    if (r.error) {
+      status.textContent = `Error: ${r.error}`;
+      return;
+    }
+
+    if (!r.groups || r.groups.length === 0) {
+      status.textContent = "No adaptations available for this module.";
+      return;
+    }
+
+    status.textContent = `${r.groups.length} adaptation groups available`;
+    list.style.display = "";
+    list.innerHTML = "";
+
+    for (const group of r.groups) {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 10px;margin-bottom:6px;background:var(--panel2);border:1px solid var(--line);border-radius:6px";
+
+      const resetBtn = document.createElement("button");
+      resetBtn.textContent = `Reset ${group}`;
+      resetBtn.style.cssText = "font-size:12px;margin-top:4px";
+      resetBtn.onclick = async () => {
+        if (!confirm(`Reset ${group} adaptation?\n\nThis will:\n1. Backup current values\n2. Reset to defaults\n3. Verify the reset\n\nECU will relearn during next drive.`)) return;
+
+        resetBtn.disabled = true;
+        resetBtn.textContent = "Resetting...";
+
+        try {
+          const result = await api("/api/adaptations/reset", {
+            module,
+            group,
+            confirm: true
+          });
+
+          if (result.error) {
+            alert(`Failed: ${result.error}`);
+          } else if (result.success) {
+            alert(`✓ ${group} adaptation reset successful!\n\nBackup: ${result.backup_id || 'saved'}`);
+          } else {
+            alert(`Reset completed but verify status: ${JSON.stringify(result)}`);
+          }
+        } catch (e) {
+          alert(`Error: ${e.message}`);
+        } finally {
+          resetBtn.disabled = false;
+          resetBtn.textContent = `Reset ${group}`;
+        }
+      };
+
+      item.innerHTML = `
+        <div style="font-weight:600;margin-bottom:4px">${group} adaptation</div>
+        <div style="font-size:11px;color:var(--dim)">ECU learned values - can be reset to factory defaults</div>
+      `;
+      item.appendChild(resetBtn);
+      list.appendChild(item);
+    }
+
+    if (!r.erase_confirmed) {
+      const warning = document.createElement("div");
+      warning.style.cssText = "padding:8px;background:var(--panel);border:1px solid var(--warn);border-radius:6px;margin-top:8px;font-size:11px;color:var(--warn)";
+      warning.innerHTML = "⚠️ <strong>Note:</strong> Adaptation reset opcode not yet car-verified. Demo mode will simulate.";
+      list.appendChild(warning);
+    }
+  } catch (e) {
+    status.textContent = `Exception: ${e.message}`;
+  }
+};
+
+// ---- Actuator Tests controls ----
+$("actuatorload").onclick = async () => {
+  const module = $("actuatormodule").value;
+  const status = $("actuatorstatus");
+  const list = $("actuatorlist");
+
+  if (!module) {
+    status.textContent = "Select a module first.";
+    list.style.display = "none";
+    return;
+  }
+
+  status.textContent = "Loading tests...";
+  list.style.display = "none";
+
+  try {
+    const r = await api(`/api/actuators?module=${module}`);
+    if (r.error) {
+      status.textContent = `Error: ${r.error}`;
+      return;
+    }
+
+    if (!r.tests || r.tests.length === 0) {
+      status.textContent = "No tests available for this module.";
+      return;
+    }
+
+    status.textContent = `${r.tests.length} tests available`;
+    list.style.display = "";
+    list.innerHTML = "";
+
+    const safetyColor = { low: "var(--ok)", medium: "var(--warn)", high: "var(--err)" };
+
+    for (const test of r.tests) {
+      const item = document.createElement("div");
+      item.style.cssText = "padding:8px 10px;margin-bottom:6px;background:var(--panel2);border:1px solid var(--line);border-radius:6px";
+
+      const testBtn = document.createElement("button");
+      testBtn.textContent = `▶ Test`;
+      testBtn.style.cssText = "font-size:12px;margin-top:4px";
+      testBtn.onclick = async () => {
+        if (!confirm(`Run ${test.desc} test?\n\n⚠️ This will activate a physical output for ${test.duration_s}s!\n\nSafety: ${test.safety}\n\n${test.source || ''}\n\nProceed?`)) return;
+
+        testBtn.disabled = true;
+        testBtn.textContent = "Running...";
+
+        try {
+          const result = await api("/api/actuator/test", {
+            module,
+            test_id: test.id,
+            confirm: true
+          });
+
+          if (result.error) {
+            alert(`Failed: ${result.error}`);
+          } else if (result.simulated) {
+            alert(`✓ Test passed safety check (demo mode - not activated)\n\n${result.note || ''}`);
+          } else if (result.success) {
+            alert(`✓ Test completed\n\nDuration: ${test.duration_s}s`);
+          } else {
+            alert(`Test result: ${JSON.stringify(result)}`);
+          }
+        } catch (e) {
+          alert(`Error: ${e.message}`);
+        } finally {
+          testBtn.disabled = false;
+          testBtn.textContent = "▶ Test";
+        }
+      };
+
+      const safetyBadge = `<span style="padding:2px 8px;border-radius:10px;font-size:10px;background:${safetyColor[test.safety] || 'var(--dim)'}22;color:${safetyColor[test.safety] || 'var(--dim)'}"> ${test.safety.toUpperCase()}</span>`;
+
+      item.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-weight:600">${test.desc}</span>
+          ${safetyBadge}
+        </div>
+        <div style="font-size:11px;color:var(--dim)">Duration: ${test.duration_s}s ${!test.available ? ' • ⚠️ Not available (opcode not verified)' : ''}</div>
+      `;
+      item.appendChild(testBtn);
+      list.appendChild(item);
+
+      if (!test.available) {
+        testBtn.disabled = true;
+        testBtn.textContent = "Not available";
+      }
+    }
+  } catch (e) {
+    status.textContent = `Exception: ${e.message}`;
+  }
+};
+
+// ---- profile switching ----
+$("profilesel").onchange = async () => {
+  if (recOn) {
+    alert("Cannot change profile while recording. Stop recording first.");
+    // restore previous value
+    if (state.profile) $("profilesel").value = state.profile;
+    return;
+  }
+  const profile = $("profilesel").value;
+  try {
+    const r = await api("/api/profile", { profile });
+    if (r.ok) {
+      state.channels = r.channels;
+      state.profile = r.profile;
+      state.profile_stats = r.profile_stats;
+      // update stats display
+      const profStats = $("profstats");
+      if (r.profile_stats) {
+        const st = r.profile_stats;
+        profStats.textContent = `Profile: ${r.profile} • Parameters: ${st.total} (ADC: ${st.adc}, RAM: ${st.ram})`;
+        profStats.style.display = "";
+        if (st.total > 18 || st.adc > 5) {
+          profStats.style.color = "var(--warn)";
+        } else {
+          profStats.style.color = "var(--dim)";
+        }
+      }
+      // rebuild UI but keep history
+      const oldCharted = charted.slice();
+      charted = r.channels.filter(c => c.graph).map(c => c.id);
+      // restore user-charted channels that still exist
+      for (const id of oldCharted) {
+        if (r.channels.find(c => c.id === id) && !charted.includes(id)) {
+          charted.push(id);
+        }
+      }
+      buildTiles();
+      buildCharts();
+    } else {
+      alert("Failed to change profile: " + (r.error || "unknown error"));
+      if (state.profile) $("profilesel").value = state.profile;
+    }
+  } catch (e) {
+    alert("Error changing profile: " + e.message);
+    if (state.profile) $("profilesel").value = state.profile;
+  }
+};
+
+// ---- raw log ----
+async function pollLog() {
+  try {
+    const entries = await api("/api/log?since=" + logSince);
+    if (entries.length) {
+      logSince = entries[entries.length - 1].seq;
+      const el = $("rawlog");
+      for (const e of entries) {
+        const line = document.createElement("div");
+        line.className = e.dir === ">>" ? "tx" : "rx";
+        line.textContent = `${e.t} ${e.dir} ${e.hex}${e.note ? " " + e.note : ""}`;
+        el.appendChild(line);
+      }
+      while (el.childNodes.length > 300) el.removeChild(el.firstChild);
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch (e) { /* server away */ }
+  setTimeout(pollLog, 700);
+}
+
+// ---- gear calibration ----
+let calInterval = null;
+
+$("calibratebtn").onclick = () => {
+  $("calmodal").style.display = "flex";
+};
+
+function closeCalModal() {
+  $("calmodal").style.display = "none";
+  if (calInterval) {
+    clearInterval(calInterval);
+    calInterval = null;
+    api("/api/calibrate-gear", { action: "cancel" });
+  }
+}
+
+async function startCalibration(gear) {
+  const r = await api("/api/calibrate-gear", { action: "start", gear });
+  if (!r.ok) { alert("Failed to start calibration"); return; }
+
+  $("caltitle").textContent = `Calibrating Gear ${gear}`;
+  $("calbody").innerHTML = `
+    <p>Drive steadily in <strong>${gear}${gear===2?"nd":gear===3?"rd":"th"} gear</strong> at <strong>2500-3000 RPM</strong>.</p>
+    <p>Samples captured: <span id="calsamples">0</span> / 25</p>
+    <p>Current ratio: <span id="calratio">—</span></p>
+    <p id="calstatus" class="muted" style="font-size:12px">⚪ Waiting for stable conditions...</p>
+  `;
+  $("calbuttons").innerHTML = `
+    <button class="primary" onclick="captureCalSample()">⏺ Capture (auto)</button>
+    <button onclick="finishGear(${gear})">Next gear →</button>
+    <button onclick="closeCalModal()">Cancel</button>
+  `;
+
+  // Auto-capture every 500ms
+  calInterval = setInterval(captureCalSample, 500);
+}
+
+async function captureCalSample() {
+  const r = await api("/api/calibrate-gear", { action: "capture" });
+  if (r.ok) {
+    if (r.stable) {
+      $("calsamples").textContent = r.samples;
+      $("calratio").textContent = r.ratio;
+      $("calstatus").innerHTML = "🟢 Sample captured";
+      $("calstatus").style.color = "var(--ok)";
+      if (r.samples >= 25) {
+        // Auto-advance after 25 samples
+        clearInterval(calInterval);
+        calInterval = null;
+        const gear = parseInt($("caltitle").textContent.match(/\d+/)[0]);
+        setTimeout(() => finishGear(gear), 500);
+      }
+    } else {
+      $("calstatus").innerHTML = `⚪ ${r.reason || "Waiting for stable conditions..."}`;
+      $("calstatus").style.color = "var(--dim)";
+    }
+  }
+}
+
+async function finishGear(gear) {
+  if (calInterval) {
+    clearInterval(calInterval);
+    calInterval = null;
+  }
+
+  const r = await api("/api/calibrate-gear", { action: "finish" });
+  if (!r.ok) { alert("Failed to save gear data"); return; }
+
+  // Show quality summary
+  const qualityColor = r.quality === "excellent" ? "var(--ok)" :
+                       r.quality === "good" ? "var(--ok)" :
+                       r.quality === "acceptable" ? "var(--warn)" : "var(--err)";
+  const qualityIcon = r.quality === "excellent" || r.quality === "good" ? "🟢" :
+                      r.quality === "acceptable" ? "🟡" : "🔴";
+
+  $("caltitle").textContent = `Gear ${gear} Complete`;
+  $("calbody").innerHTML = `
+    <p><strong>Ratio: ${r.ratio}</strong></p>
+    <p style="font-size:12px;color:var(--dim)">
+      σ = ${r.std_dev} • Range: ${r.min} - ${r.max}
+    </p>
+    <p style="color:${qualityColor}">${qualityIcon} Quality: ${r.quality}</p>
+  `;
+
+  if (gear < 5) {
+    // Continue to next gear
+    $("calbuttons").innerHTML = `
+      <button class="primary" onclick="startCalibration(${gear + 1})">Next: Gear ${gear + 1}</button>
+      <button onclick="closeCalModal()">Finish early</button>
+    `;
+  } else {
+    // Done with all gears
+    $("caltitle").textContent = "Calibration Complete";
+    $("calbody").innerHTML = `
+      <p>✓ All gears calibrated successfully!</p>
+      <p>Gear ratios saved:</p>
+      <ul>${Object.entries(r.all_ratios).map(([g,v]) => `<li>Gear ${g}: ${v}</li>`).join('')}</ul>
+    `;
+    $("calbuttons").innerHTML = `<button onclick="closeCalModal()">Done</button>`;
+  }
+}
+
+// ---- Tab navigation ----
+// Composes with per-section gating: an inactive tab hides via .tabhide
+// (display:none !important); the active tab removes it, so each section's own
+// inline display (set by setState gating) then decides visibility.
+function showTab(name) {
+  window.activeTab = name;
+  document.querySelectorAll("[data-tabbtn]").forEach(b =>
+    b.classList.toggle("active", b.dataset.tabbtn === name));
+  document.querySelectorAll("section[data-tab]").forEach(sec =>
+    sec.classList.toggle("tabhide", sec.dataset.tab !== name));
+}
+document.querySelectorAll("[data-tabbtn]").forEach(b =>
+  b.onclick = () => showTab(b.dataset.tabbtn));
+showTab("dashboard");
+
+(async () => { setState(await api("/api/state")); pollLog(); })();
+</script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Desktop-app wrapper virtualenv + generated bundle
+.venv/
+*.app/
+_app.iconset/
+_iconbase.png
+
+# Runtime writable data — never commit (may contain VIN / vehicle telemetry)
+backups/
+kline_raw.log
+fault_snapshots.log
+vanos_events.log
+verified_maps.json
+drive_log_*.csv
+power_log_*.csv
+*.log

@@ -1,0 +1,5 @@
+# Optional desktop-app wrapper (desktop_app.py) — NOT needed for the
+# stdlib-only core (power_diag.py, ds2_diag.py, diag_ui.py).
+# On macOS pywebview uses the built-in WKWebView via pyobjc (pulled in
+# automatically). No Chromium is bundled.
+pywebview>=5.0

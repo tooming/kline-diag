@@ -1,0 +1,2195 @@
+#!/usr/bin/env python3
+"""Web UI for BMW K-line diagnostics — faults, clearing, live data + graphs.
+
+Serves a single-page dashboard (ui.html) and a JSON/SSE API on top of the
+existing transports:
+  - E87 2005 (KWP2000 fast init, 10400 8N1)  -> power_diag.py
+  - E39 1998 (DS2, 9600 8E1)                 -> ds2_diag.py
+
+Run:  python3 diag_ui.py  [--port-http 8039]
+then open http://localhost:8039
+
+Stdlib only, same as the rest of the toolkit. The serial port has a single
+owner (this server); all car I/O is serialized through one lock. Fault
+memories are snapshotted to fault_snapshots.log before every clear.
+"""
+import argparse
+import collections
+import json
+import os
+import queue
+import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import power_diag  # noqa: E402
+import ds2_diag    # noqa: E402
+from power_diag import KLine, hexs, frame_payload, now  # noqa: E402
+from transaction import get_transaction_manager  # noqa: E402
+import coding  # noqa: E402
+
+E87_DTC = {}
+try:
+    with open(os.path.join(HERE, "e87_dtc.json")) as f:
+        E87_DTC = json.load(f)
+except OSError:
+    pass
+
+CAR_LOCK = threading.RLock()
+RAW_LOG = collections.deque(maxlen=400)
+RAW_SEQ = [0]
+
+
+def log_hook(orig):
+    def wrapped(dirn, data, note=""):
+        RAW_SEQ[0] += 1
+        RAW_LOG.append({"seq": RAW_SEQ[0],
+                        "t": time.strftime("%H:%M:%S"),
+                        "dir": dirn, "hex": hexs(data), "note": note})
+        orig(dirn, data, note)
+    return wrapped
+
+
+# Live channel profiles for the MS41 fast logger. The MS41 firmware has a
+# practical limit of ~20 parameters per address list (38 arms but responds
+# with status B0; 17 streams correctly at 9-10 Hz). Groups drive the dashboard
+# layout; graph=True channels chart by default. IDs = RomRaider param ids
+# in ms41_ram_params.json.
+MS41_PROFILES = {
+    "driveability": [
+        ("P8", "RPM", "Engine", True),
+        ("P9", "Vehicle Speed", "Engine", True),
+        ("P13", "Throttle", "Engine", True),
+        ("E2", "Load", "Engine", True),
+        ("P12", "MAF", "Airflow", True),
+        ("P18", "MAF Voltage", "Airflow", False),
+        ("P21", "Injector PW", "Fuel", True),
+        ("E13", "STFT Bank 1", "Fuel Trim", True),
+        ("E14", "STFT Bank 2", "Fuel Trim", True),
+        ("E21", "LTFT Bank 1", "Fuel Trim", False),
+        ("E22", "LTFT Bank 2", "Fuel Trim", False),
+        ("P10", "Ignition Advance", "Ignition", True),
+        ("E217", "Knock Retard", "Ignition", True),
+        ("E11", "VANOS Angle", "VANOS", True),
+        ("P2", "Coolant Temp", "Temps", False),
+        ("P11", "Intake Temp", "Temps", False),
+        ("P17", "Battery", "Temps", True),
+    ],
+    "fuel": [
+        ("P8", "RPM", "Engine", True),
+        ("P13", "Throttle", "Engine", True),
+        ("E2", "Load", "Engine", False),
+        ("P12", "MAF", "Airflow", True),
+        ("P21", "Injector PW", "Fuel", True),
+        ("E13", "STFT Bank 1", "Fuel Trim", True),
+        ("E14", "STFT Bank 2", "Fuel Trim", True),
+        ("E21", "LTFT Bank 1", "Fuel Trim", True),
+        ("E22", "LTFT Bank 2", "Fuel Trim", True),
+        ("E19", "Idle FT Bank 1", "Fuel Trim", False),
+        ("E20", "Idle FT Bank 2", "Fuel Trim", False),
+        ("E101", "O2 Voltage #1", "O2 Sensors", True),
+        ("E102", "O2 Voltage #2", "O2 Sensors", True),
+        ("E15", "O2 Heater #1", "O2 Sensors", False),
+        ("E16", "O2 Heater #2", "O2 Sensors", False),
+        ("E202", "Purge PWM", "Fuel", False),
+        ("E9", "IACV", "Idle", False),
+    ],
+    "knock": [
+        ("P8", "RPM", "Engine", True),
+        ("E2", "Load", "Engine", True),
+        ("P13", "Throttle", "Engine", False),
+        ("P10", "Ignition Advance", "Timing", True),
+        ("E24", "Global Knock Retard", "Knock", True),
+        ("E217", "Current Knock Retard", "Knock", True),
+        ("E204", "Knock Cyl 1", "Cylinders", True),
+        ("E205", "Knock Cyl 2", "Cylinders", True),
+        ("E206", "Knock Cyl 3", "Cylinders", True),
+        ("E207", "Knock Cyl 4", "Cylinders", True),
+        ("E208", "Knock Cyl 5", "Cylinders", True),
+        ("E209", "Knock Cyl 6", "Cylinders", True),
+    ],
+    "sensors": [
+        ("P8", "RPM", "Engine", False),
+        ("P13", "Throttle", "Engine", False),
+        ("P18", "MAF Voltage", "Voltages", True),
+        ("P19", "TPS Voltage", "Voltages", True),
+        ("P17", "Battery Voltage", "Voltages", True),
+        ("E101", "O2 Voltage #1", "O2", True),
+        ("E102", "O2 Voltage #2", "O2", True),
+        ("P11", "IAT", "Temps", False),
+        ("P2", "ECT", "Temps", False),
+        ("P12", "MAF", "Airflow", False),
+        ("E9", "IACV", "Idle", False),
+        ("E202", "Purge PWM", "Fuel", False),
+    ],
+    "vanos": [
+        ("P8", "RPM", "Engine", True),
+        ("P9", "Vehicle Speed", "Engine", True),
+        ("P13", "Throttle", "Engine", True),
+        ("E2", "Load", "Engine", True),
+        ("P12", "MAF", "Airflow", True),
+        ("P21", "Injector PW", "Fuel", True),
+        ("P10", "Ignition Advance", "Timing", True),
+        ("E217", "Knock Retard", "Timing", True),
+        ("E11", "Cam Position", "VANOS", True),
+        ("S23", "VANOS Command", "VANOS", True),
+        ("E210", "Adjust Angle (raw)", "VANOS", False),
+        ("P2", "Coolant Temp", "Temps", True),
+        ("P11", "Intake Temp", "Temps", False),
+    ],
+}
+
+# The RomRaider expressions for switch params use BitWise()/! which our
+# safe-eval can't run — python-eval-able replacements, verified against the
+# XML semantics (S23: 0xFFC1 bit4, inverted -> 1 when VANOS commanded).
+EXPR_OVERRIDES = {
+    "S23": ("0 if (x & 16) else 1", "cmd"),
+    "E210": ("x", "raw"),
+}
+
+
+class E39Adapter:
+    """DS2 protocol (1998 523i)."""
+    name = "E39 (DS2 9600 8E1)"
+    proto = "e39"
+    modules = ds2_diag.E39_MODULES
+    vin = "WBAXXXXXXXXXXXXXX"  # TODO: Read from IKE or EWS
+
+    def __init__(self, profile="driveability"):
+        self.kl = KLine(baud=ds2_diag.DS2_BAUD, parity="E",
+                        rawlog_path=os.path.join(HERE, "kline_raw.log"))
+        self.kl.log = log_hook(self.kl.log)
+        self.ds2 = ds2_diag.DS2(self.kl)
+        self.current_profile = profile
+        # DME defaults to MS41 (M52); refined by detect() once the engine's
+        # ident is read, so any family E39 loads the right parameter map.
+        self.dme = {"dme": "MS41", "engine": "M52",
+                    "params": "ms41_ram_params.json",
+                    "evidence": "default (not yet detected)"}
+        self._load_dme_params(self.dme)
+        self._build_profile(profile)
+
+    def _load_dme_params(self, descriptor):
+        import dme_registry
+        plist = dme_registry.load_params(
+            descriptor, part_number=descriptor.get("matched_part"))
+        if not plist:  # unknown/mapless DME -> fall back to MS41 ids
+            try:
+                with open(os.path.join(HERE, "ms41_ram_params.json")) as f:
+                    plist = json.load(f)
+            except OSError:
+                plist = []
+        self._all_params = {p["id"]: p for p in plist}
+
+    def _build_profile(self, profile):
+        """Build live_channels and logger from the given profile name."""
+        if profile not in MS41_PROFILES:
+            profile = "driveability"
+        self.current_profile = profile
+        self.live_channels = []
+        params = []
+        adc_count = 0
+        for pid, label, group, graph in MS41_PROFILES[profile]:
+            if pid not in self._all_params:
+                continue
+            p = self._all_params[pid]
+            if pid in EXPR_OVERRIDES:
+                p = dict(p)
+                p["expr"], p["units"] = EXPR_OVERRIDES[pid]
+            # Count ADC reads (addresses < 0x1C use ADC procedure type)
+            if int(p["addr"], 16) < 0x1C:
+                adc_count += 1
+            self.live_channels.append(
+                {"id": pid, "label": label, "group": group,
+                 "unit": p["units"], "graph": graph})
+            params.append(p)
+        if any(p["id"] == "S23" for p in params):
+            # synthetic channel computed by VanosMonitor from S23 + E11
+            self.live_channels.append(
+                {"id": "vanos_state", "label": "VANOS State",
+                 "group": "VANOS", "unit": "", "graph": False})
+        self.logger = ds2_diag.MS41Logger(self.ds2, params)
+        self.profile_stats = {
+            "total": len(params),
+            "adc": adc_count,
+            "ram": len(params) - adc_count
+        }
+
+    def set_profile(self, profile_name):
+        """Switch to a different logging profile and re-arm the logger."""
+        self._build_profile(profile_name)
+        return {"ok": True, "profile": self.current_profile,
+                "channels": self.live_channels, "profile_stats": self.profile_stats}
+
+    def close(self):
+        self.kl.close()
+
+    def detect(self):
+        f = self.ds2.ident(0x12, timeout=0.5)
+        if f is None:
+            return False
+        # Identify the engine/DME from the ident ASCII and load its map.
+        import dme_registry
+        data = ds2_diag.body(f)
+        asc = "".join(chr(c) if 32 <= c < 127 else "." for c in data)
+        dme = dme_registry.detect_dme(asc)
+        if dme["dme"] != "unknown":
+            self.dme = dme
+            self.name = (f"E39 {dme['engine']}/{dme['dme']} (DS2 9600 8E1)")
+            self._load_dme_params(dme)
+            self._build_profile(self.current_profile)
+        return True
+
+    def engine_info(self):
+        import verification
+        base = self.dme.get("evidence", "")
+        return {"dme": self.dme.get("dme"), "engine": self.dme.get("engine"),
+                "evidence": verification.dme_evidence(
+                    self.vin, self.dme.get("dme"), base),
+                "base_evidence": base,
+                "verified": verification.is_verified(
+                    self.vin, self.dme.get("dme")),
+                "matched_part": self.dme.get("matched_part"),
+                "param_count": len(self._all_params)}
+
+    def sia_reset(self, kind=0x01):
+        f = self.ds2.sia_reset(kind)
+        if f is None:
+            return {"ok": False, "error": "no response from cluster"}
+        st = f[2]
+        return {"ok": st == 0xA0,
+                "status": f"0x{st:02X} "
+                          f"({ds2_diag.STATUS_BYTE.get(st, '?')})"}
+
+    def scan(self):
+        out = []
+        for addr, name in self.modules.items():
+            f = self.ds2.ident(addr, timeout=0.3)
+            if f is None:
+                continue
+            data = ds2_diag.body(f)
+            asc = "".join(chr(c) if 32 <= c < 127 else "." for c in data)
+            out.append({"addr": addr, "name": name,
+                        "ident": hexs(data), "ident_ascii": asc})
+        return out
+
+    def faults(self, addr):
+        f = self.ds2.faults(addr)
+        if f is None:
+            return {"ok": False, "error": "no response"}
+        st = f[2]
+        if st != 0xA0:
+            return {"ok": False,
+                    "error": f"status 0x{st:02X} "
+                             f"({ds2_diag.STATUS_BYTE.get(st, '?')})"}
+        data = ds2_diag.body(f)
+        n = data[0] if data else 0
+        rest = data[1:]
+        entries = []
+        table = ds2_diag.DTC_TABLES.get(addr, {})
+        if n and rest and len(rest) % n == 0:
+            size = len(rest) // n
+            for k in range(n):
+                e = rest[k * size:(k + 1) * size]
+                if not any(e):
+                    continue
+                art = (ds2_diag.fault_type_text(addr, e[1])
+                       if size >= 2 else "")
+                entries.append({"code": f"{e[0]:02X}",
+                                "raw": hexs(e),
+                                "text": table.get(e[0], ""),
+                                "status": art})
+        elif n:
+            entries.append({"code": "?", "raw": hexs(rest),
+                            "text": "(unknown entry layout)", "status": ""})
+        return {"ok": True, "count": n, "entries": entries,
+                "raw": hexs(data)}
+
+    def clear(self, addr):
+        f = self.ds2.clear(addr)
+        if f is None:
+            return {"ok": False, "error": "no response to clear"}
+        return {"ok": f[2] == 0xA0, "status": f"0x{f[2]:02X}",
+                "after": self.faults(addr)}
+
+    def live_sample(self):
+        return self.logger.sample() or {}
+
+
+class DemoAdapter(E39Adapter):
+    """Simulated 523i for demoing the UI without the car connected.
+
+    Replays the module inventory and the real fault codes recorded from the
+    car, and synthesizes a repeating drive cycle: idle -> pull -> overrun.
+    VANOS alternates per cycle between responding (engage event) and frozen
+    (fault event) so the state tile and event log can be seen working.
+    """
+    name = "DEMO — simulated 523i (no car)"
+    proto = "e39"
+
+    # (ident hex, fault-entry-size, fault bytes) — real data from the car
+    DEMO_MODULES = {
+        0x12: ("31 34 32 39 38 36 31", 0, b""),
+        0x44: ("88 38 24 54 02 81 81 07 26 98 04 05", 2,
+               bytes.fromhex("433F410A0FFF4005")),
+        0x56: ("01 16 41 30 59 06 08 00 27 98 08 01 80", 5,
+               bytes.fromhex("06000102AC")),
+        0x5B: ("88 37 54 53 02 03 21 08 26 98 21 07", 0, b""),
+        0x60: ("88 38 52 32 01 02 01 01 26 98 14 11", 0, b""),
+        0x80: ("F8 37 56 69 04 05 32 08 38 97 10 11 02 24", 3,
+               bytes.fromhex("83C26EC78100")),
+        0xD0: ("08 37 28 75 10 16 12 00 27 98 01 32", 0, b""),
+        0xE8: ("88 38 24 68 04 00 00 00 26 98 02 13", 0, b""),
+    }
+
+    # Demo coding data (example E39 coding strings)
+    DEMO_CODING = {
+        0x80: bytes([0x01, 0x0F, 0x01, 0x01, 0x41]),  # IKE: US, Touring, digital speed
+        0xD0: bytes([0x01, 0x3C, 0x02, 0x03]),        # LCM: US, Xenon, DRL+comfort blink
+        0x00: bytes([0x01, 0x45, 0x83]),              # GM: US, auto lock, selective unlock, comfort close, crash unlock, mirror fold
+        0x5B: bytes([0x01, 0x00, 0xE5]),              # IHKA: US, Celsius, auto recirc + rest + economy + solar
+    }
+
+    def __init__(self, profile="vanos"):
+        self.kl = None
+        self.ds2 = None
+        self.current_profile = profile
+        # the demo replays the real M52/MS41 car
+        self.dme = {"dme": "MS41", "engine": "M52",
+                    "params": "ms41_ram_params.json",
+                    "evidence": "demo (simulated M52)", "matched_part": "1429861"}
+        try:
+            with open(os.path.join(HERE, "ms41_ram_params.json")) as f:
+                self._all_params = {p["id"]: p for p in json.load(f)}
+        except OSError:
+            self._all_params = {}
+        self._build_profile(profile)
+        self.t0 = time.time()
+        self._faults = {a: (size, bytes(raw))
+                        for a, (_, size, raw) in self.DEMO_MODULES.items()}
+
+    def demo_ram_dump(self, start, count):
+        """Simulated RAM for the explorer demo. Most bytes are static; a few
+        near the real MS41 RPM address (0xDA2A) vary with the simulated engine
+        speed, so an idle-vs-rev diff reveals them — exactly the discovery
+        workflow, without a car."""
+        import math
+        t = time.time() - self.t0
+        phase = t % 24.0
+        rpm = 800 if phase < 6 else (1200 + 3300 * min(1, (phase - 6) / 8)
+                                     if phase < 14 else 2100)
+        out = {}
+        for a in range(start, start + count):
+            if a in (0xDA2A, 0xDA2B):          # RPM word (hi, lo)
+                rpm_raw = int(rpm)
+                out[a] = (rpm_raw >> 8) if a == 0xDA2A else (rpm_raw & 0xFF)
+            elif a == 0xDA34:                   # MAF-ish, tracks rpm
+                out[a] = min(255, int(rpm / 16))
+            elif a == 0xDA5A:                   # coolant, ~static warm
+                out[a] = 0xB8
+            else:                               # deterministic static filler
+                out[a] = (a * 37) & 0xFF
+        return out
+
+    def close(self):
+        pass
+
+    def detect(self):
+        return True
+
+    def sia_reset(self, kind=0x01):
+        return {"ok": True, "status": "0xA0 (OK) [demo]"}
+
+    def scan(self):
+        out = []
+        for addr, (ident, _, _) in self.DEMO_MODULES.items():
+            data = bytes.fromhex(ident.replace(" ", ""))
+            asc = "".join(chr(c) if 32 <= c < 127 else "." for c in data)
+            out.append({"addr": addr,
+                        "name": ds2_diag.E39_MODULES.get(addr, "?"),
+                        "ident": hexs(data), "ident_ascii": asc})
+        return out
+
+    def faults(self, addr):
+        if addr not in self._faults:
+            return {"ok": False, "error": "no response"}
+        size, raw = self._faults[addr]
+        entries = []
+        table = ds2_diag.DTC_TABLES.get(addr, {})
+        n = (len(raw) // size) if size else 0
+        for k in range(n):
+            e = raw[k * size:(k + 1) * size]
+            art = ds2_diag.fault_type_text(addr, e[1]) if size >= 2 else ""
+            entries.append({"code": f"{e[0]:02X}", "raw": hexs(e),
+                            "text": table.get(e[0], ""), "status": art})
+        return {"ok": True, "count": n, "entries": entries, "raw": hexs(raw)}
+
+    def clear(self, addr):
+        self._faults[addr] = (0, b"")
+        return {"ok": True, "status": "cleared [demo]",
+                "after": self.faults(addr)}
+
+    def read_coding(self, addr):
+        """Return demo coding data for testing."""
+        time.sleep(0.05)  # simulate bus latency
+        if addr in self.DEMO_CODING:
+            return self.DEMO_CODING[addr]
+        return None
+
+    def live_sample(self):
+        time.sleep(0.08)  # simulate bus latency (~10 Hz)
+        import math
+        t = time.time() - self.t0
+        phase = t % 24.0                 # one drive cycle
+        vanos_ok = (t % 48.0) < 24.0     # alternate healthy/faulty cycles
+        if phase < 6:                    # idle
+            rpm, tps = 780 + 25 * math.sin(t * 2.1), 1.5
+        elif phase < 14:                 # accelerating pull
+            k = (phase - 6) / 8
+            rpm, tps = 1200 + 3300 * k, 82
+        elif phase < 17:                 # overrun
+            rpm, tps = 4500 - (phase - 14) * 1100, 2
+        else:                            # cruise
+            rpm, tps = 2100 + 40 * math.sin(t * 1.3), 22
+        load = min(700.0, 90 + tps * 6.2 + rpm * 0.02)
+        cmd = 1 if (1700 < rpm < 4600 and load > 180) else 0
+        cam_rest, cam_adv = 26.6, 48.7
+        cam = cam_adv if (cmd and vanos_ok) else cam_rest
+        maf = round(rpm * load / 25000, 1)
+        noise = math.sin(t * 3.7)
+        s = {
+            "P8": round(rpm), "P9": round(rpm / 48),
+            "P13": round(tps, 1), "E2": round(load, 1),
+            "P12": maf, "P18": round(1.0 + maf / 200, 2),
+            "P21": round(1.4 + load / 120, 2),
+            "E13": round(2.3 * noise, 1), "E14": round(-1.8 * noise, 1),
+            "E21": 1.6, "E22": 2.4,
+            "P10": round(12 + tps / 8 + noise, 1),
+            "E217": 0.0, "E24": 0.0,
+            "E11": round(cam + 0.2 * noise, 1),
+            "S23": cmd, "E210": round(cam - cam_rest),
+            "P2": 91, "P11": 24, "P17": 14.1,
+            "P19": round(0.6 + tps * 0.04, 2), "E9": 28.0,
+            "E101": round(0.45 + 0.4 * noise, 2),
+            "E102": round(0.45 - 0.4 * noise, 2),
+        }
+        return {k: v for k, v in s.items()
+                if any(c["id"] == k for c in self.live_channels)
+                or k in ("P8",)}
+
+
+class E87Adapter:
+    """KWP2000 (2005 E87)."""
+    name = "E87 (KWP2000 10400 8N1)"
+    proto = "e87"
+    vin = "WBAXXXXXXXXXXXXXX"  # TODO: Read from module
+    modules = {a: n for a, n in power_diag.MODULES.items()
+               if a in (0x00, 0x01, 0x12, 0x29, 0x40, 0x60, 0x63, 0x64,
+                        0x72, 0x78)}
+    live_channels = [
+        {"id": "battery_v", "label": "Battery", "unit": "V",
+         "group": "Temps/V", "graph": True},
+        {"id": "rpm", "label": "RPM", "unit": "rpm",
+         "group": "Engine", "graph": True},
+        {"id": "coolant_c", "label": "Coolant", "unit": "°C",
+         "group": "Temps/V", "graph": False},
+    ]
+
+    def __init__(self):
+        self.kl = KLine(rawlog_path=os.path.join(HERE, "kline_raw.log"))
+        self.kl.log = log_hook(self.kl.log)
+        self._live_init = False
+
+    def close(self):
+        self.kl.close()
+
+    def detect(self):
+        r = self.kl.fast_init(0x12)
+        if r:
+            self.kl.stop_comm(0x12)
+            return True
+        return False
+
+    def scan(self):
+        out = []
+        self._live_init = False
+        for addr, name in self.modules.items():
+            r = self.kl.fast_init(addr)
+            if r is None:
+                continue
+            ident = power_diag.read_ident(self.kl, addr) or ""
+            out.append({"addr": addr, "name": name, "ident": ident,
+                        "ident_ascii": ""})
+            self.kl.stop_comm(addr)
+        return out
+
+    def faults(self, addr, _init=True):
+        if _init:
+            self._live_init = False
+            if self.kl.fast_init(addr) is None:
+                return {"ok": False, "error": "no response to init"}
+        p = power_diag.read_dtcs(self.kl, addr)
+        if p is None:
+            return {"ok": False, "error": "no response to fault read"}
+        n = p[1]
+        entries = []
+        body = p[2:]
+        for k in range(min(n, len(body) // 3)):
+            hi, lo, st = body[3 * k], body[3 * k + 1], body[3 * k + 2]
+            bits = ",".join(nm for bit, nm in power_diag.STATUS_BITS
+                            if st & bit)
+            code = f"{hi:02X}{lo:02X}"
+            entries.append({"code": code, "raw": f"{code} {st:02X}",
+                            "text": E87_DTC.get(code, ""),
+                            "status": bits})
+        if _init:
+            self.kl.stop_comm(addr)
+        return {"ok": True, "count": n, "entries": entries, "raw": hexs(p)}
+
+    def clear(self, addr):
+        self._live_init = False
+        if self.kl.fast_init(addr) is None:
+            return {"ok": False, "error": "no response to init"}
+        cleared = False
+        neg = None
+        for req in (b"\x14\xFF\xFF", b"\x14\xFF\xFF\x00", b"\x14\x00\x00"):
+            frames = self.kl.request(req, addr, timeout=1.5)
+            for f in frames:
+                p = frame_payload(f)
+                if p[:1] == b"\x54":
+                    cleared = True
+                elif p[:2] == b"\x7F\x14":
+                    neg = p[2]
+            if cleared or (neg is not None and neg != 0x12):
+                break
+        after = self.faults(addr, _init=False)
+        self.kl.stop_comm(addr)
+        return {"ok": cleared,
+                "status": "cleared" if cleared else
+                          (f"refused 7F 14 {neg:02X}" if neg is not None
+                           else "no answer"),
+                "after": after}
+
+    def live_sample(self):
+        if not self._live_init:
+            if self.kl.fast_init(0x12) is None:
+                return {}
+            self._live_init = True
+        s = {}
+        frames = self.kl.request(b"\x21\x5A", 0x12, timeout=0.35, retries=1)
+        for f in frames:
+            p = frame_payload(f)
+            if p[:1] == b"\x61" and len(p) > 2:
+                s["battery_v"] = round(p[2] * 0.1, 1)
+        d = power_diag.obd_pid(self.kl, 0x0C, 0x12, retries=1)
+        if d and len(d) >= 2:
+            s["rpm"] = round(((d[0] << 8) | d[1]) / 4)
+        d = power_diag.obd_pid(self.kl, 0x05, 0x12, retries=1)
+        if d:
+            s["coolant_c"] = d[0] - 40
+        if not s:
+            self._live_init = False  # force re-init next time
+        return s
+
+
+ADAPTER = None            # current protocol adapter
+ADAPTER_ERR = ""
+LIVE_CLIENTS = set()      # live SSE listeners exist -> sampler runs
+LIVE_LAST = {}
+RECORDER = {"on": False, "path": None, "file": None, "count": 0,
+            "lock": threading.Lock()}
+CSV_QUEUE = queue.Queue(maxsize=1000)  # Buffer for CSV writer thread
+PULL_STATE = {"active": False, "counter": 0, "prev_rpm": 0}
+
+
+class VanosMonitor:
+    """Correlates the VANOS solenoid command (S23) with the measured cam
+    position (E11) to classify VANOS behaviour in real time.
+
+    On this M52 single-VANOS engine the cam RESTS at ~26.6 °crank (raw 0x47)
+    and should depart from that position within a few hundred ms of being
+    commanded. The rest position is slow-learned while uncommanded. A fault
+    event fires when the command stays on past GRACE_S with no movement —
+    exactly the failure signature under investigation (frozen E11 + E210=0).
+    """
+    REST_DEFAULT = 26.6
+    MOVE_THRESH = 4.0    # °crank departure from rest = "cam moved"
+    GRACE_S = 0.7        # allowed response time after command asserts
+
+    def __init__(self):
+        self.rest = self.REST_DEFAULT
+        self.cmd_since = None
+        self.fault_logged = False
+        self.engage_logged = False
+        self.last_state = "—"
+
+    def update(self, s, tnow=None):
+        """Returns (state_string, event_or_None) for a live sample dict."""
+        tnow = tnow if tnow is not None else time.time()
+        cmd = s.get("S23")
+        pos = s.get("E11")
+        event = None
+        if cmd is None or pos is None:
+            self.last_state = "—"
+            return self.last_state, None
+        moved = abs(pos - self.rest) >= self.MOVE_THRESH
+        if not cmd:
+            if not moved:
+                # slow-learn the true rest position while uncommanded
+                self.rest += 0.02 * (pos - self.rest)
+                state = "rest"
+            else:
+                state = "moved w/o cmd?"
+            self.cmd_since = None
+            self.fault_logged = False
+            self.engage_logged = False
+        else:
+            if self.cmd_since is None:
+                self.cmd_since = tnow
+            if moved:
+                state = "ENGAGED"
+                if not self.engage_logged:
+                    event = "vanos_engaged"
+                    self.engage_logged = True
+            elif tnow - self.cmd_since > self.GRACE_S:
+                state = "FAULT"
+                if not self.fault_logged:
+                    event = "vanos_fault"
+                    self.fault_logged = True
+            else:
+                state = "engaging…"
+        self.last_state = state
+        return state, event
+
+
+VANOS_MON = VanosMonitor()
+
+
+def log_vanos_event(event, s):
+    """Persist a VANOS event with a telemetry snapshot; returns UI payload."""
+    snap = {
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "event": event,
+        "rpm": s.get("P8"), "throttle": s.get("P13"), "load": s.get("E2"),
+        "cam_pos_e11": s.get("E11"), "adjust_e210": s.get("E210"),
+        "cmd_s23": s.get("S23"), "rest_learned": round(VANOS_MON.rest, 2),
+        "coolant": s.get("P2"),
+    }
+    try:
+        with open(os.path.join(HERE, "vanos_events.log"), "a") as f:
+            f.write(json.dumps(snap) + "\n")
+    except OSError:
+        pass
+    return snap
+
+# Event tracking state (for detecting transitions)
+EVENT_STATE = {
+    "prev_profile": None,
+    "prev_gear": None,
+    "prev_knock": 0,
+    "prev_vanos": 0,
+    "prev_health": {},
+}
+
+# Gear calibration state
+CALIBRATION = {"active": False, "gear": None, "samples": [],
+               "last_rpm": None, "last_speed": None, "last_throttle": None}
+
+# Default E39 523i manual transmission gear ratios (RPM/km/h) as initial guesses.
+# These will be overridden by calibrated values from gear_ratios.json if present.
+DEFAULT_GEAR_RATIOS = {
+    2: 75.0,   # 2nd gear
+    3: 50.0,   # 3rd gear
+    4: 37.5,   # 4th gear
+    5: 30.0,   # 5th gear
+}
+
+
+def load_gear_ratios():
+    """Load calibrated gear ratios from file, or return defaults."""
+    path = os.path.join(HERE, "gear_ratios.json")
+    try:
+        with open(path) as f:
+            ratios = json.load(f)
+            # Convert string keys to ints
+            return {int(k): float(v) for k, v in ratios.items()}
+    except (OSError, json.JSONDecodeError, ValueError):
+        return DEFAULT_GEAR_RATIOS.copy()
+
+
+def save_gear_ratios(ratios):
+    """Save calibrated gear ratios to file."""
+    path = os.path.join(HERE, "gear_ratios.json")
+    with open(path, "w") as f:
+        json.dump(ratios, f, indent=2)
+
+
+GEAR_RATIOS = load_gear_ratios()
+
+
+def is_stable_for_calibration(rpm, speed, throttle, last_rpm, last_speed, last_throttle):
+    """Check if driving conditions are stable enough for gear calibration.
+
+    Returns: (is_stable, reason)
+    """
+    if speed < 20:
+        return False, "Speed too low (<20 km/h)"
+    if last_rpm is None:
+        return True, "First sample"
+
+    rpm_change = abs(rpm - last_rpm)
+    speed_change = abs(speed - last_speed)
+    throttle_change = abs(throttle - last_throttle) if last_throttle else 0
+
+    if rpm_change > 50:
+        return False, f"RPM unstable (Δ{rpm_change:.0f})"
+    if speed_change > 1:
+        return False, f"Speed unstable (Δ{speed_change:.1f})"
+    if throttle_change > 2:
+        return False, f"Throttle moving (Δ{throttle_change:.1f}%)"
+
+    return True, "Stable"
+
+
+def estimate_gear(rpm, speed_kmh):
+    """Estimate current gear from RPM and vehicle speed ratio.
+
+    Returns: (gear_num, confidence, ratio) or (None, 0, 0) if unable to determine.
+    Confidence considers ratio match + stability (future: add RPM/speed stability).
+    """
+    if not rpm or not speed_kmh or speed_kmh < 5:
+        return None, 0, 0
+
+    ratio = rpm / speed_kmh
+
+    # Find closest gear ratio
+    best_gear = None
+    best_diff = float('inf')
+    for gear, expected_ratio in GEAR_RATIOS.items():
+        diff = abs(ratio - expected_ratio)
+        if diff < best_diff:
+            best_diff = diff
+            best_gear = gear
+
+    # Confidence: 1.0 if perfect match, drops off with distance
+    # Allow wider tolerance for RPM fluctuations during steady driving
+    if best_gear:
+        expected = GEAR_RATIOS[best_gear]
+        deviation = best_diff / expected
+        confidence = max(0, 1.0 - deviation * 3)  # 33% deviation = 0 confidence
+        return best_gear, confidence, ratio
+
+    return None, 0, ratio
+
+
+def evaluate_health(values):
+    """M52-specific health evaluation from live data.
+
+    Returns dict of subsystem statuses with color (green/yellow/red/blue) and text.
+    Works with both E39 (DS2) and E87 (KWP2000) parameter sets.
+    """
+    health = {}
+
+    # Extract common values (handle both E39 and E87 parameter names)
+    rpm = values.get("P8") or values.get("rpm")
+    speed_kmh = values.get("P9")  # E87 doesn't log speed
+    throttle = values.get("P13", 0)
+    coolant = values.get("P2") or values.get("coolant_c")
+    v_batt = values.get("P17") or values.get("battery_v")
+
+    # Gear estimation (only if we have speed)
+    if rpm and speed_kmh:
+        gear, confidence, ratio = estimate_gear(rpm, speed_kmh)
+        if gear and confidence > 0.3:
+            health["gear"] = {"color": "blue", "text": f"Gear {gear}", "value": f"{ratio:.1f}"}
+        elif speed_kmh > 5:
+            health["gear"] = {"color": "yellow", "text": "Gear unknown", "value": f"{ratio:.1f}"}
+
+    # Battery / Charging
+    if v_batt is not None:
+        if 13.6 <= v_batt <= 14.6:
+            health["charging"] = {"color": "green", "text": "Charging OK", "value": f"{v_batt:.1f}V"}
+        elif 13.0 <= v_batt < 13.6 or 14.6 < v_batt <= 15.0:
+            health["charging"] = {"color": "yellow", "text": "Voltage borderline", "value": f"{v_batt:.1f}V"}
+        else:
+            health["charging"] = {"color": "red", "text": "Voltage abnormal", "value": f"{v_batt:.1f}V"}
+
+    # Coolant temp (P2 or E87 coolant_c)
+    if coolant is not None:
+        if coolant < 80:
+            health["coolant"] = {"color": "blue", "text": "Warming up", "value": f"{coolant:.0f}°C"}
+        elif 80 <= coolant <= 105:
+            health["coolant"] = {"color": "green", "text": "Temp normal", "value": f"{coolant:.0f}°C"}
+        elif 105 < coolant <= 112:
+            health["coolant"] = {"color": "yellow", "text": "Running hot", "value": f"{coolant:.0f}°C"}
+        else:
+            health["coolant"] = {"color": "red", "text": "Overheating", "value": f"{coolant:.0f}°C"}
+
+    # Intake air temp (P11)
+    iat = values.get("P11")
+    if iat is not None:
+        if iat < 45:
+            health["iat"] = {"color": "green", "text": "IAT good", "value": f"{iat:.0f}°C"}
+        elif 45 <= iat <= 65:
+            health["iat"] = {"color": "yellow", "text": "IAT elevated", "value": f"{iat:.0f}°C"}
+        else:
+            health["iat"] = {"color": "red", "text": "IAT hot", "value": f"{iat:.0f}°C"}
+
+    # Fuel trims (E13, E14, E21, E22)
+    stft1 = values.get("E13")
+    stft2 = values.get("E14")
+    ltft1 = values.get("E21")
+    ltft2 = values.get("E22")
+    trims = [t for t in [stft1, stft2, ltft1, ltft2] if t is not None]
+    if trims:
+        max_trim = max(abs(t) for t in trims)
+        if max_trim < 5:
+            health["fuel"] = {"color": "green", "text": "Fuel trim excellent", "value": f"{max_trim:.1f}%"}
+        elif max_trim < 10:
+            health["fuel"] = {"color": "yellow", "text": "Fuel trim compensating", "value": f"{max_trim:.1f}%"}
+        else:
+            health["fuel"] = {"color": "red", "text": "Fuel trim high", "value": f"{max_trim:.1f}%"}
+
+    # MAF health (P12)
+    maf = values.get("P12")
+    if maf is not None and rpm is not None:
+        if rpm < 1000:
+            # M52 2.5L idle MAF should be ~15-22 kg/h
+            if 15 <= maf <= 22:
+                health["maf"] = {"color": "green", "text": "Idle airflow OK", "value": f"{maf:.1f} kg/h"}
+            elif 12 <= maf < 15 or 22 < maf <= 28:
+                health["maf"] = {"color": "yellow", "text": "Idle airflow off", "value": f"{maf:.1f} kg/h"}
+            else:
+                health["maf"] = {"color": "red", "text": "Idle airflow abnormal", "value": f"{maf:.1f} kg/h"}
+        else:
+            # Driving - just show value without health assessment
+            health["maf"] = {"color": "blue", "text": "MAF", "value": f"{maf:.1f} kg/h"}
+
+    # VANOS: command-vs-response when S23 is logged, else position-only.
+    # NOTE: single-VANOS cam RESTS at ~26.6° (raw 0x47) — "active" means the
+    # position DEPARTS from rest, not that it is nonzero.
+    vanos = values.get("E11")
+    if "S23" in values and vanos is not None:
+        st = VANOS_MON.last_state
+        color = {"ENGAGED": "green", "rest": "green", "engaging…": "blue",
+                 "FAULT": "red", "moved w/o cmd?": "yellow"}.get(st, "blue")
+        text = {"ENGAGED": "VANOS engaged", "rest": "VANOS at rest",
+                "engaging…": "VANOS engaging",
+                "FAULT": "Commanded, cam not moving",
+                "moved w/o cmd?": "Cam moved w/o command"}.get(st, "VANOS")
+        health["vanos"] = {"color": color, "text": text,
+                           "value": f"{vanos:.1f}° (rest {VANOS_MON.rest:.1f}°)"}
+    elif vanos is not None and coolant is not None and coolant >= 70:
+        departed = abs(vanos - VANOS_MON.rest) >= VanosMonitor.MOVE_THRESH
+        if throttle > 20 and rpm and rpm > 1500:
+            if departed:
+                health["vanos"] = {"color": "green", "text": "VANOS active", "value": f"{vanos:.0f}°"}
+            else:
+                health["vanos"] = {"color": "yellow", "text": "VANOS not moving", "value": f"{vanos:.0f}°"}
+        else:
+            health["vanos"] = {"color": "green", "text": "VANOS idle", "value": f"{vanos:.0f}°"}
+
+    # Knock retard (E217 or E24)
+    knock = values.get("E217")
+    if knock is None:
+        knock = values.get("E24")
+    if knock is not None:
+        knock_abs = abs(knock)
+        if knock_abs < 2:
+            health["timing"] = {"color": "green", "text": "No knock", "value": f"{knock:.1f}°"}
+        elif knock_abs < 5:
+            health["timing"] = {"color": "yellow", "text": "Mild knock", "value": f"{knock:.1f}°"}
+        else:
+            health["timing"] = {"color": "red", "text": "Heavy knock", "value": f"{knock:.1f}°"}
+
+    return health
+
+
+def detect_pull(values):
+    """Detect pull start/end based on throttle, load, and RPM.
+
+    Start: throttle > 80%, load > 70%, RPM increasing
+    End: throttle < 60% OR load < 50% (hysteresis to avoid flicker)
+
+    Returns: ("start", pull_number) | ("end", pull_number) | None
+    """
+    # Extract values, handling different param IDs across profiles
+    throttle = values.get("P13", 0)  # Throttle
+    load = values.get("E2", 0)       # Load
+    rpm = values.get("P8", 0)        # RPM
+
+    prev_rpm = PULL_STATE["prev_rpm"]
+    PULL_STATE["prev_rpm"] = rpm
+    rpm_increasing = rpm > prev_rpm + 100  # significant increase
+
+    if not PULL_STATE["active"]:
+        # Check for pull start
+        if throttle > 80 and load > 70 and rpm_increasing:
+            PULL_STATE["active"] = True
+            PULL_STATE["counter"] += 1
+            return ("start", PULL_STATE["counter"])
+    else:
+        # Check for pull end (hysteresis)
+        if throttle < 60 or load < 50:
+            PULL_STATE["active"] = False
+            return ("end", PULL_STATE["counter"])
+
+    return None
+
+
+def record_start():
+    with RECORDER["lock"]:
+        if RECORDER["on"]:
+            return RECORDER["path"]
+        # Include profile name in filename for easier comparison
+        profile = getattr(ADAPTER, "current_profile", None) if ADAPTER else None
+        profile_str = f"_{profile}" if profile else ""
+        path = os.path.join(
+            HERE, f"drive_log_{time.strftime('%Y%m%d_%H%M%S')}{profile_str}.csv")
+        f = open(path, "w", buffering=1)
+        ids = [c["id"] for c in (ADAPTER.live_channels if ADAPTER else [])]
+        # Event columns: event, pull_id, event_data for extensible event system
+        f.write("time,epoch,event,pull_id,event_data," + ",".join(ids) + "\n")
+        RECORDER.update(on=True, path=path, file=f, count=0, ids=ids)
+        # Reset pull state when starting new recording
+        PULL_STATE.update(active=False, counter=0, prev_rpm=0)
+        return path
+
+
+def record_stop():
+    with RECORDER["lock"]:
+        if RECORDER["file"]:
+            RECORDER["file"].close()
+        RECORDER.update(on=False, file=None)
+        return {"path": RECORDER["path"], "rows": RECORDER["count"]}
+
+
+def record_row(values):
+    with RECORDER["lock"]:
+        if not RECORDER["on"]:
+            return
+
+        event = ""
+        pull_id = ""
+        event_data_obj = {}
+
+        # Check for profile changes
+        current_profile = getattr(ADAPTER, "current_profile", None) if ADAPTER else None
+        if current_profile and current_profile != EVENT_STATE["prev_profile"]:
+            if EVENT_STATE["prev_profile"] is not None:  # Skip first sample
+                event = "profile_change"
+                event_data_obj = {"profile": current_profile}
+            EVENT_STATE["prev_profile"] = current_profile
+
+        # Check for pull transitions (only if no other event)
+        if not event:
+            transition = detect_pull(values)
+            if transition:
+                event_type, num = transition
+                pull_id = str(num)
+                if event_type == "start":
+                    event = "pull_start"
+                    # Include current gear if available
+                    rpm = values.get("P8") or values.get("rpm")
+                    speed = values.get("P9")
+                    if rpm and speed and speed > 5:
+                        gear, confidence, _ = estimate_gear(rpm, speed)
+                        if gear and confidence > 0.7:
+                            event_data_obj["gear"] = gear
+                elif event_type == "end":
+                    event = "pull_end"
+
+        # Serialize event_data as JSON (empty object if no data)
+        event_data = json.dumps(event_data_obj) if event_data_obj else "{}"
+
+        # Write data row with event columns (event, pull_id, event_data)
+        t = time.time()
+        ts = time.strftime("%H:%M:%S", time.localtime(t)) + f".{int(t % 1 * 1000):03d}"
+        row = [ts, f"{t:.3f}", event, pull_id, event_data]
+        row += [str(values.get(i, "")) for i in RECORDER["ids"]]
+        RECORDER["file"].write(",".join(row) + "\n")
+        RECORDER["count"] += 1
+
+
+def connect(proto="auto"):
+    global ADAPTER, ADAPTER_ERR
+    with CAR_LOCK:
+        if ADAPTER:
+            ADAPTER.close()
+            ADAPTER = None
+        order = {"auto": [E39Adapter, E87Adapter],
+                 "demo": [DemoAdapter],
+                 "e39": [E39Adapter], "e87": [E87Adapter]}[proto]
+        errs = []
+        for cls in order:
+            try:
+                a = cls()
+            except Exception as e:
+                errs.append(f"{cls.proto}: port error {e}")
+                continue
+            if a.detect():
+                ADAPTER = a
+                ADAPTER_ERR = ""
+                return a
+            a.close()
+            errs.append(f"{cls.proto}: no response")
+        ADAPTER_ERR = "; ".join(errs)
+        return None
+
+
+def snapshot_faults(addr, faults):
+    with open(os.path.join(HERE, "fault_snapshots.log"), "a") as f:
+        f.write(json.dumps({
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "protocol": ADAPTER.proto if ADAPTER else "?",
+            "addr": f"0x{addr:02X}",
+            "faults": faults}) + "\n")
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):  # quiet
+        pass
+
+    def _json(self, obj, code=200):
+        data = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n) or b"{}")
+
+    def do_GET(self):
+        if self.path in ("/", "/index.html"):
+            with open(os.path.join(HERE, "ui.html"), "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+        elif self.path == "/api/state":
+            profile = getattr(ADAPTER, "current_profile", None) if ADAPTER else None
+            profiles = list(MS41_PROFILES.keys()) if ADAPTER and ADAPTER.proto == "e39" else []
+            stats = getattr(ADAPTER, "profile_stats", None) if ADAPTER else None
+            vin = getattr(ADAPTER, "vin", None) if ADAPTER else None
+            self._json({"connected": ADAPTER is not None,
+                        "protocol": ADAPTER.proto if ADAPTER else None,
+                        "name": ADAPTER.name if ADAPTER else None,
+                        "vin": vin,
+                        "channels": ADAPTER.live_channels if ADAPTER else [],
+                        "profile": profile,
+                        "profiles": profiles,
+                        "profile_stats": stats,
+                        "error": ADAPTER_ERR})
+        elif self.path == "/api/vehicle":
+            # Get vehicle information
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+
+            # Gather vehicle info from adapter and modules
+            vehicle_info = {
+                "vin": ADAPTER.vin,
+                "protocol": ADAPTER.proto,
+                "adapter_name": ADAPTER.name
+            }
+
+            # Try to get additional info from IKE ident (if E39)
+            if ADAPTER.proto == "e39" and hasattr(ADAPTER, 'ds2') and ADAPTER.ds2:
+                with CAR_LOCK:
+                    ike_frame = ADAPTER.ds2.ident(0x80, timeout=0.5)
+                    if ike_frame:
+                        ike_data = ds2_diag.body(ike_frame)
+                        ike_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in ike_data)
+                        vehicle_info["ike_ident"] = ike_str.strip()
+
+                        # Try to parse model from ident
+                        # E39 IKE ident format varies, but often contains model info
+                        if "523" in ike_str:
+                            vehicle_info["model"] = "E39 523i"
+                            vehicle_info["engine"] = "M52TU"
+                        elif "528" in ike_str:
+                            vehicle_info["model"] = "E39 528i"
+                            vehicle_info["engine"] = "M52TU"
+                        elif "540" in ike_str:
+                            vehicle_info["model"] = "E39 540i"
+                            vehicle_info["engine"] = "M62"
+                        else:
+                            vehicle_info["model"] = "E39"
+
+                        # Parse year from VIN (10th character = year code)
+                        if len(ADAPTER.vin) >= 10:
+                            year_char = ADAPTER.vin[9]
+                            # Simplified year parsing (W=1998, X=1999, Y=2000, etc.)
+                            year_map = {'W': 1998, 'X': 1999, 'Y': 2000, '1': 2001, '2': 2002, '3': 2003}
+                            vehicle_info["year"] = year_map.get(year_char, "Unknown")
+
+            elif ADAPTER.proto == "e87":
+                vehicle_info["model"] = "E87"
+                vehicle_info["year"] = 2005  # From VIN
+
+            # Add transmission type (default unknown, can be enhanced)
+            vehicle_info["transmission"] = "Unknown"
+
+            # TODO: Read mileage from IKE (requires specific DS2 service)
+            vehicle_info["mileage_km"] = None
+
+            self._json(vehicle_info)
+
+        elif self.path == "/api/modules/summary":
+            # Get summary of all modules (for dashboard ECU grid)
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+
+            with CAR_LOCK:
+                modules = ADAPTER.scan()
+
+            # Format summary with last scan timestamp
+            import time
+            summary = []
+            for m in modules:
+                # Extract part number and SW version from ident if possible
+                # For E39 DS2: format varies by module, ident_ascii often has part info
+                part_number = m.get("ident_ascii", "Unknown").strip()
+                sw_version = "Unknown"
+
+                # For DME specifically, ident_ascii is typically the part number
+                if m["name"].startswith("DME"):
+                    part_number = m.get("ident_ascii", "Unknown").strip()
+
+                summary.append({
+                    "addr": m["addr"],
+                    "name": m["name"],
+                    "part_number": part_number,
+                    "sw_version": sw_version,
+                    "last_scan": time.time()  # Current time as scan just happened
+                })
+
+            self._json({"modules": summary})
+
+        elif self.path == "/api/backups":
+            # List all backups for current VIN
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+            tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+            backups = tm.list_backups(ADAPTER.vin)
+            self._json({"vin": ADAPTER.vin, "backups": backups})
+        elif self.path.startswith("/api/backup/"):
+            # Get specific backup by operation_id
+            # URL format: /api/backup/{operation_id}
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+            operation_id = self.path.split("/api/backup/")[1]
+            tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+            backup = tm.get_backup(ADAPTER.vin, operation_id)
+            if backup:
+                self._json(backup)
+            else:
+                self._json({"error": "backup not found"}, 404)
+        elif self.path.startswith("/api/coding/preview"):
+            # Preview what a preset would change (without applying)
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+            if ADAPTER.proto != "e39":
+                return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
+
+            # Parse addr and preset_id from query string
+            addr = None
+            preset_id = None
+            if "?" in self.path:
+                for param in self.path.split("?")[1].split("&"):
+                    if param.startswith("addr="):
+                        addr_str = param.split("=")[1]
+                        addr = int(addr_str, 16 if addr_str.startswith("0x") else 10)
+                    elif param.startswith("preset_id="):
+                        preset_id = param.split("=")[1]
+
+            if addr is None or not preset_id:
+                return self._json({"error": "addr and preset_id required"}, 400)
+
+            module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
+            presets = coding.get_presets_for_module(module_name)
+
+            if preset_id not in presets:
+                return self._json({"error": f"preset '{preset_id}' not found"}, 400)
+
+            preset = presets[preset_id]
+            decoder = coding.get_coding_decoder(module_name, protocol="ds2")
+
+            if not decoder:
+                return self._json({"error": "no decoder available"}, 400)
+
+            with CAR_LOCK:
+                # Read current coding
+                if isinstance(ADAPTER, DemoAdapter):
+                    current_coding = ADAPTER.read_coding(addr)
+                else:
+                    frame = ADAPTER.ds2.read_coding(addr)
+                    if frame is None or frame[2] != 0xA0:
+                        return self._json({"error": "failed to read coding"}, 400)
+                    current_coding = ds2_diag.body(frame)
+
+                if current_coding is None:
+                    return self._json({"error": "no coding data"}, 400)
+
+                # Apply preset to get new coding (without writing)
+                new_coding = decoder.apply_preset(current_coding, preset)
+
+                # Decode both to show diff
+                before = decoder.decode_coding(current_coding)
+                after = decoder.decode_coding(new_coding)
+
+                # Find what changed
+                changes = []
+                for i, (b_byte, a_byte) in enumerate(zip(before["bytes"], after["bytes"])):
+                    if b_byte.get("type") == "bitfield" and a_byte.get("type") == "bitfield":
+                        for bit_name in b_byte["bits"]:
+                            if b_byte["bits"][bit_name]["value"] != a_byte["bits"][bit_name]["value"]:
+                                changes.append({
+                                    "field": bit_name,
+                                    "before": b_byte["bits"][bit_name]["value"],
+                                    "after": a_byte["bits"][bit_name]["value"]
+                                })
+                    elif b_byte.get("type") == "enum" and a_byte.get("type") == "enum":
+                        if b_byte["value"] != a_byte["value"]:
+                            changes.append({
+                                "field": b_byte["name"],
+                                "before": b_byte["value"],
+                                "after": a_byte["value"]
+                            })
+
+                self._json({
+                    "preset": preset,
+                    "before": before,
+                    "after": after,
+                    "changes": changes,
+                    "raw_before": current_coding.hex().upper(),
+                    "raw_after": new_coding.hex().upper()
+                })
+
+        elif self.path.startswith("/api/coding/presets"):
+            # Get available presets for a module
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+            if ADAPTER.proto != "e39":
+                return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
+
+            # Parse addr from query string
+            addr = None
+            if "?" in self.path and "addr=" in self.path:
+                addr_str = self.path.split("addr=")[1].split("&")[0]
+                addr = int(addr_str, 16 if addr_str.startswith("0x") else 10)
+
+            if addr is None:
+                return self._json({"error": "addr parameter required"}, 400)
+
+            module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
+            presets = coding.get_presets_for_module(module_name)
+
+            self._json({
+                "addr": addr,
+                "module": module_name,
+                "presets": presets
+            })
+
+        elif self.path.startswith("/api/coding"):
+            # Read coding from module
+            if not ADAPTER:
+                return self._json({"error": "not connected"}, 400)
+            if ADAPTER.proto != "e39":
+                return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
+
+            # Parse query string for addr
+            addr = None
+            if "?" in self.path and "addr=" in self.path:
+                addr_str = self.path.split("addr=")[1].split("&")[0]
+                addr = int(addr_str, 16 if addr_str.startswith("0x") else 10)
+
+            if addr is None:
+                return self._json({"error": "addr parameter required"}, 400)
+
+            with CAR_LOCK:
+                # Handle demo mode
+                if isinstance(ADAPTER, DemoAdapter):
+                    coding_data = ADAPTER.read_coding(addr)
+                    if coding_data is None:
+                        return self._json({"error": "no coding data for this module in demo"}, 400)
+                else:
+                    # Real car
+                    frame = ADAPTER.ds2.read_coding(addr)
+                    if frame is None:
+                        return self._json({"error": "no response from module"}, 400)
+
+                    if frame[2] != 0xA0:
+                        return self._json({"error": f"module returned status 0x{frame[2]:02X}"}, 400)
+
+                    coding_data = ds2_diag.body(frame)
+
+                module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
+
+                # Try to decode if we have a decoder for this module
+                decoder = coding.get_coding_decoder(module_name, protocol="ds2")
+                if decoder:
+                    decoded = decoder.decode_coding(coding_data)
+                    self._json({
+                        "addr": addr,
+                        "module": module_name,
+                        "raw": coding_data.hex().upper(),
+                        "decoded": decoded,
+                        "has_decoder": True
+                    })
+                else:
+                    self._json({
+                        "addr": addr,
+                        "module": module_name,
+                        "raw": coding_data.hex().upper(),
+                        "has_decoder": False
+                    })
+        elif self.path == "/api/live":
+            self._sse_live()
+        elif self.path.startswith("/api/log"):
+            since = 0
+            if "since=" in self.path:
+                since = int(self.path.split("since=")[1])
+            self._json([e for e in RAW_LOG if e["seq"] > since])
+        # --- Additive analysis endpoints (Agent-2, Phases 5/6/7/11) ---
+        # Read-only, operate on saved files; independent of live adapter.
+        elif self.path.startswith("/api/recordings"):
+            import glob as _glob
+            files = sorted(_glob.glob(os.path.join(HERE, "drive_log_*.csv")),
+                           reverse=True)
+            out = []
+            for p in files:
+                try:
+                    rows = sum(1 for _ in open(p)) - 1
+                except OSError:
+                    rows = 0
+                out.append({"name": os.path.basename(p), "rows": rows})
+            self._json(out)
+        elif self.path.startswith("/api/snapshots"):
+            import snapshot as _snap
+            vin = None
+            if "vin=" in self.path:
+                vin = self.path.split("vin=")[1].split("&")[0]
+            self._json(_snap.list_snapshots(vin))
+        elif self.path.startswith("/api/profiles"):
+            import vehicle_profiles as _vp
+            self._json(_vp.list_profiles())
+        elif self.path.startswith("/api/actuators"):
+            import actuators as _act
+            self._json({"tests": _act.list_tests(),
+                        "maintenance": _act.list_maintenance()})
+        elif self.path.startswith("/api/adaptations"):
+            import adaptations as _ad
+            self._json({"groups": list(_ad.ADAPTATION_GROUPS),
+                        "erase_confirmed": _ad.ERASE_OPCODE is not None})
+        elif self.path.startswith("/api/engine"):
+            # Detected engine/DME for the connected car + supported list.
+            import dme_registry
+            info = ADAPTER.engine_info() if (ADAPTER and hasattr(
+                ADAPTER, "engine_info")) else None
+            self._json({"detected": info,
+                        "supported": dme_registry.all_engines()})
+        elif self.path.startswith("/api/operations/summary"):
+            import operations as _ops
+            try:
+                self._json(_ops.OperationDB.load().summary())
+            except OSError:
+                self._json({"error": "operations.json not built"}, 404)
+        elif self.path.startswith("/api/operations"):
+            # Protocol Explorer: the operation database with evidence grades.
+            import operations as _ops
+            ecu = None
+            if "ecu=" in self.path:
+                ecu = self.path.split("ecu=")[1].split("&")[0]
+            try:
+                db = _ops.OperationDB.load()
+            except OSError:
+                return self._json({"error": "operations.json not built"}, 404)
+            out = []
+            for o in db.all(ecu=ecu):
+                out.append({"ecu": o["ecu"], "name": o["name"],
+                            "kind": o["kind"], "sgbd_job": o.get("sgbd_job"),
+                            "description": o.get("description", ""),
+                            "grade": _ops.evidence_grade(o),
+                            "car_usable": _ops.usable_on_car(o),
+                            "evidence": o["evidence"]})
+            self._json({"ecus": db.ecus(), "operations": out})
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def do_POST(self):
+        try:
+            if self.path == "/api/connect":
+                proto = self._body().get("protocol", "auto")
+                a = connect(proto)
+                profile = getattr(a, "current_profile", None) if a else None
+                profiles = list(MS41_PROFILES.keys()) if a and a.proto == "e39" else []
+                stats = getattr(a, "profile_stats", None) if a else None
+                self._json({"connected": a is not None,
+                            "protocol": a.proto if a else None,
+                            "name": a.name if a else None,
+                            "channels": a.live_channels if a else [],
+                            "profile": profile,
+                            "profiles": profiles,
+                            "profile_stats": stats,
+                            "error": ADAPTER_ERR})
+            elif self.path == "/api/scan":
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                with CAR_LOCK:
+                    self._json({"modules": ADAPTER.scan()})
+            elif self.path == "/api/faults":
+                addr = int(self._body()["addr"])
+                with CAR_LOCK:
+                    self._json(ADAPTER.faults(addr))
+            elif self.path == "/api/clear":
+                b = self._body()
+                addr = int(b["addr"])
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+
+                # Use transaction layer for safe fault clear with backup
+                tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+                module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
+
+                with CAR_LOCK:
+                    result = tm.execute(
+                        vin=ADAPTER.vin,
+                        module_name=module_name,
+                        module_addr=addr,
+                        operation="clear_faults",
+                        read_fn=lambda: ADAPTER.faults(addr),
+                        write_fn=lambda: ADAPTER.clear(addr),
+                        verify_fn=lambda: ADAPTER.faults(addr).get("count", 0) == 0,
+                        user_note=b.get("note", "")
+                    )
+
+                    # Keep old snapshot log for backwards compatibility
+                    if result["success"]:
+                        snapshot_faults(addr, result.get("write_result", {}))
+
+                    self._json(result)
+            elif self.path == "/api/restore":
+                # Restore from backup with verification
+                b = self._body()
+                operation_id = b.get("operation_id")
+                if not operation_id:
+                    return self._json({"error": "operation_id required"}, 400)
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+
+                tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+
+                # Load the backup
+                backup = tm.get_backup(ADAPTER.vin, operation_id)
+                if not backup:
+                    return self._json({"error": "backup not found"}, 404)
+
+                meta = backup["metadata"]
+                modules = meta.get("modules", {})
+
+                if not modules:
+                    return self._json({"error": "no modules in backup"}, 400)
+
+                # For now, only support restoring single module
+                module_name = list(modules.keys())[0]
+                module_info = modules[module_name]
+                addr = module_info["addr"]
+                backup_data = backup["data"][module_name]
+
+                # Restore is essentially a write operation, so use transaction layer
+                # Note: This is a placeholder - actual restore depends on operation type
+                # For fault memory, we can't really "restore" faults, but for coding/adaptations
+                # we would write the old values back
+
+                with CAR_LOCK:
+                    if meta["operation"] == "clear_faults":
+                        # Can't restore faults that were cleared
+                        return self._json({
+                            "error": "Cannot restore cleared faults - they must naturally return if cause is present"
+                        }, 400)
+                    else:
+                        # Generic restore (for future coding/adaptations)
+                        return self._json({
+                            "error": "Restore not yet implemented for this operation type"
+                        }, 400)
+            elif self.path == "/api/coding/apply":
+                # Apply a coding preset with transaction layer backup
+                b = self._body()
+                addr = b.get("addr")
+                preset_id = b.get("preset_id")
+
+                if addr is None:
+                    return self._json({"error": "addr required"}, 400)
+                if not preset_id:
+                    return self._json({"error": "preset_id required"}, 400)
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                if ADAPTER.proto != "e39":
+                    return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
+
+                addr = int(addr)
+                module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
+
+                # Get the preset
+                presets = coding.get_presets_for_module(module_name)
+                if preset_id not in presets:
+                    return self._json({"error": f"preset '{preset_id}' not found for module"}, 400)
+
+                preset = presets[preset_id]
+
+                # Get decoder
+                decoder = coding.get_coding_decoder(module_name, protocol="ds2")
+                if not decoder:
+                    return self._json({"error": "no coding decoder available for this module"}, 400)
+
+                # Read current coding, apply preset, write with transaction layer
+                def read_coding_fn():
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            return ADAPTER.read_coding(addr)
+                        else:
+                            frame = ADAPTER.ds2.read_coding(addr)
+                            if frame is None or frame[2] != 0xA0:
+                                raise Exception("Failed to read current coding")
+                            return ds2_diag.body(frame)
+
+                def write_coding_fn(new_coding):
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            # Update demo adapter's coding
+                            ADAPTER.DEMO_CODING[addr] = new_coding
+                            return {"status": "ok (demo)"}
+                        else:
+                            frame = ADAPTER.ds2.write_coding(addr, new_coding)
+                            if frame is None or frame[2] != 0xA0:
+                                raise Exception(f"Write failed: status {frame[2]:02X}" if frame else "no response")
+                            return {"status": f"0x{frame[2]:02X}"}
+
+                def verify_coding_fn(expected_coding):
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            readback = ADAPTER.read_coding(addr)
+                        else:
+                            frame = ADAPTER.ds2.read_coding(addr)
+                            if frame is None or frame[2] != 0xA0:
+                                return False
+                            readback = ds2_diag.body(frame)
+                        return readback == expected_coding
+
+                try:
+                    # Read current coding
+                    current_coding = read_coding_fn()
+
+                    # Apply preset to get new coding
+                    new_coding = decoder.apply_preset(current_coding, preset)
+
+                    # Use transaction manager for safe write
+                    tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+
+                    # Create serializable backup data
+                    def read_for_backup():
+                        return {
+                            "raw_hex": current_coding.hex(),
+                            "decoded": decoder.decode_coding(current_coding)
+                        }
+
+                    result = tm.execute(
+                        vin=ADAPTER.vin,
+                        module_name=module_name,
+                        module_addr=addr,
+                        operation=f"coding_preset_{preset_id}",
+                        read_fn=read_for_backup,
+                        write_fn=lambda: write_coding_fn(new_coding),
+                        verify_fn=lambda: verify_coding_fn(new_coding),
+                        user_note=f"Applied preset: {preset['name']}"
+                    )
+
+                    # Add before/after coding to result
+                    result["before"] = decoder.decode_coding(current_coding)
+                    result["after"] = decoder.decode_coding(new_coding)
+
+                    self._json(result)
+
+                except Exception as e:
+                    self._json({"error": str(e)}, 500)
+
+            elif self.path == "/api/coding/write":
+                # Manual coding write with transaction layer
+                b = self._body()
+                addr = b.get("addr")
+                coding_hex = b.get("coding_hex")
+
+                if addr is None:
+                    return self._json({"error": "addr required"}, 400)
+                if not coding_hex:
+                    return self._json({"error": "coding_hex required"}, 400)
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                if ADAPTER.proto != "e39":
+                    return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
+
+                addr = int(addr)
+                module_name = ADAPTER.modules.get(addr, f"Module_0x{addr:02X}")
+
+                # Parse hex string to bytes
+                try:
+                    new_coding = bytes.fromhex(coding_hex)
+                except ValueError:
+                    return self._json({"error": "invalid hex string"}, 400)
+
+                # Get decoder
+                decoder = coding.get_coding_decoder(module_name, protocol="ds2")
+                if not decoder:
+                    return self._json({"error": "no coding decoder available for this module"}, 400)
+
+                # Read current coding, write new coding with transaction layer
+                def read_coding_fn():
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            return ADAPTER.read_coding(addr)
+                        else:
+                            frame = ADAPTER.ds2.read_coding(addr)
+                            if frame is None or frame[2] != 0xA0:
+                                raise Exception("Failed to read current coding")
+                            return ds2_diag.body(frame)
+
+                def write_coding_fn(coding_bytes):
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            ADAPTER.DEMO_CODING[addr] = coding_bytes
+                            return {"status": "ok (demo)"}
+                        else:
+                            frame = ADAPTER.ds2.write_coding(addr, coding_bytes)
+                            if frame is None or frame[2] != 0xA0:
+                                raise Exception(f"Write failed: status {frame[2]:02X}" if frame else "no response")
+                            return {"status": f"0x{frame[2]:02X}"}
+
+                def verify_coding_fn(expected_coding):
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            readback = ADAPTER.read_coding(addr)
+                        else:
+                            frame = ADAPTER.ds2.read_coding(addr)
+                            if frame is None or frame[2] != 0xA0:
+                                return False
+                            readback = ds2_diag.body(frame)
+                        return readback == expected_coding
+
+                try:
+                    # Read current coding
+                    current_coding = read_coding_fn()
+
+                    # Create serializable backup data
+                    def read_for_backup():
+                        return {
+                            "raw_hex": current_coding.hex(),
+                            "decoded": decoder.decode_coding(current_coding)
+                        }
+
+                    # Use transaction manager for safe write
+                    tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+
+                    result = tm.execute(
+                        vin=ADAPTER.vin,
+                        module_name=module_name,
+                        module_addr=addr,
+                        operation="coding_manual_edit",
+                        read_fn=read_for_backup,
+                        write_fn=lambda: write_coding_fn(new_coding),
+                        verify_fn=lambda: verify_coding_fn(new_coding),
+                        user_note=b.get("user_note", "Manual coding edit")
+                    )
+
+                    # Add before/after coding to result
+                    result["before"] = decoder.decode_coding(current_coding)
+                    result["after"] = decoder.decode_coding(new_coding)
+
+                    self._json(result)
+
+                except Exception as e:
+                    self._json({"error": str(e)}, 500)
+
+            elif self.path == "/api/coding/restore":
+                # Restore coding from a backup
+                b = self._body()
+                operation_id = b.get("operation_id")
+                module_name = b.get("module_name")
+
+                if not operation_id or not module_name:
+                    return self._json({"error": "operation_id and module_name required"}, 400)
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                if ADAPTER.proto != "e39":
+                    return self._json({"error": "coding only supported on E39 (DS2) currently"}, 400)
+
+                tm = get_transaction_manager(backup_root=os.path.join(HERE, "backups"))
+
+                # Load the backup
+                backup = tm.get_backup(ADAPTER.vin, operation_id)
+                if not backup:
+                    return self._json({"error": "backup not found"}, 404)
+
+                if module_name not in backup["data"]:
+                    return self._json({"error": f"module '{module_name}' not in backup"}, 400)
+
+                backup_data = backup["data"][module_name]
+                if "raw_hex" not in backup_data:
+                    return self._json({"error": "backup does not contain coding data"}, 400)
+
+                # Parse module address from backup metadata
+                module_info = backup["metadata"]["modules"][module_name]
+                addr = module_info["addr"]
+
+                # Get the old coding bytes to restore
+                old_coding = bytes.fromhex(backup_data["raw_hex"])
+
+                # Get decoder for this module
+                decoder = coding.get_coding_decoder(module_name, protocol="ds2")
+                if not decoder:
+                    return self._json({"error": "no decoder available for this module"}, 400)
+
+                # Define read/write/verify functions
+                def read_coding_fn():
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            return ADAPTER.read_coding(addr)
+                        else:
+                            frame = ADAPTER.ds2.read_coding(addr)
+                            if frame is None or frame[2] != 0xA0:
+                                raise Exception("Failed to read current coding")
+                            return ds2_diag.body(frame)
+
+                def write_coding_fn(coding_bytes):
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            ADAPTER.DEMO_CODING[addr] = coding_bytes
+                            return {"status": "ok (demo)"}
+                        else:
+                            frame = ADAPTER.ds2.write_coding(addr, coding_bytes)
+                            if frame is None or frame[2] != 0xA0:
+                                raise Exception(f"Write failed: status {frame[2]:02X}" if frame else "no response")
+                            return {"status": f"0x{frame[2]:02X}"}
+
+                def verify_coding_fn(expected_coding):
+                    with CAR_LOCK:
+                        if isinstance(ADAPTER, DemoAdapter):
+                            readback = ADAPTER.read_coding(addr)
+                        else:
+                            frame = ADAPTER.ds2.read_coding(addr)
+                            if frame is None or frame[2] != 0xA0:
+                                return False
+                            readback = ds2_diag.body(frame)
+                        return readback == expected_coding
+
+                try:
+                    # Read current coding before restore
+                    current_coding = read_coding_fn()
+
+                    # Create serializable backup data
+                    def read_for_backup():
+                        return {
+                            "raw_hex": current_coding.hex(),
+                            "decoded": decoder.decode_coding(current_coding)
+                        }
+
+                    # Use transaction manager for safe restore
+                    result = tm.execute(
+                        vin=ADAPTER.vin,
+                        module_name=module_name,
+                        module_addr=addr,
+                        operation="coding_restore",
+                        read_fn=read_for_backup,
+                        write_fn=lambda: write_coding_fn(old_coding),
+                        verify_fn=lambda: verify_coding_fn(old_coding),
+                        user_note=f"Restored from backup: {operation_id}"
+                    )
+
+                    # Add before/after coding to result
+                    result["before"] = decoder.decode_coding(current_coding)
+                    result["after"] = decoder.decode_coding(old_coding)
+                    result["restored_from"] = operation_id
+
+                    self._json(result)
+
+                except Exception as e:
+                    self._json({"error": str(e)}, 500)
+
+            elif self.path == "/api/sia-reset":
+                b = self._body()
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+                if not hasattr(ADAPTER, "sia_reset"):
+                    return self._json(
+                        {"error": "SIA reset only available on the E39"}, 400)
+                with CAR_LOCK:
+                    self._json(ADAPTER.sia_reset(int(b.get("kind", 1))))
+            elif self.path == "/api/record":
+                if self._body().get("on"):
+                    self._json({"on": True, "path": record_start()})
+                else:
+                    r = record_stop()
+                    self._json({"on": False, **r})
+            elif self.path == "/api/profile":
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                if not hasattr(ADAPTER, "set_profile"):
+                    return self._json(
+                        {"error": "profile switching only available on E39"}, 400)
+                b = self._body()
+                profile = b.get("profile")
+                if not profile:
+                    return self._json({"error": "profile name required"}, 400)
+                if RECORDER["on"]:
+                    return self._json(
+                        {"error": "cannot change profile while recording"}, 400)
+                with CAR_LOCK:
+                    result = ADAPTER.set_profile(profile)
+                self._json(result)
+            elif self.path == "/api/calibrate-gear":
+                b = self._body()
+                action = b.get("action")
+                if action == "start":
+                    gear = int(b.get("gear", 2))
+                    CALIBRATION.update(active=True, gear=gear, samples=[])
+                    self._json({"ok": True, "gear": gear, "samples": 0})
+                elif action == "capture":
+                    if not CALIBRATION["active"]:
+                        return self._json({"error": "calibration not active"}, 400)
+                    # Get current sample from live data
+                    if LIVE_LAST.get("ok") and LIVE_LAST.get("values"):
+                        v = LIVE_LAST["values"]
+                        rpm = v.get("P8")
+                        speed = v.get("P9")
+                        throttle = v.get("P13", 0)
+                        if rpm and speed:
+                            # Check stability
+                            stable, reason = is_stable_for_calibration(
+                                rpm, speed, throttle,
+                                CALIBRATION.get("last_rpm"),
+                                CALIBRATION.get("last_speed"),
+                                CALIBRATION.get("last_throttle"))
+                            CALIBRATION.update(last_rpm=rpm, last_speed=speed,
+                                             last_throttle=throttle)
+                            if stable:
+                                ratio = rpm / speed
+                                CALIBRATION["samples"].append(ratio)
+                                self._json({"ok": True, "stable": True,
+                                           "samples": len(CALIBRATION["samples"]),
+                                           "ratio": round(ratio, 1)})
+                            else:
+                                self._json({"ok": True, "stable": False, "reason": reason})
+                        else:
+                            self._json({"error": "no RPM or speed data"}, 400)
+                    else:
+                        self._json({"error": "no live data available"}, 400)
+                elif action == "finish":
+                    if not CALIBRATION["active"] or not CALIBRATION["samples"]:
+                        return self._json({"error": "no samples captured"}, 400)
+                    gear = CALIBRATION["gear"]
+                    samples = CALIBRATION["samples"]
+                    mean_ratio = sum(samples) / len(samples)
+                    # Compute quality statistics
+                    variance = sum((s - mean_ratio) ** 2 for s in samples) / len(samples)
+                    std_dev = variance ** 0.5
+                    min_ratio = min(samples)
+                    max_ratio = max(samples)
+                    # Quality assessment
+                    if std_dev < 0.5:
+                        quality = "excellent"
+                    elif std_dev < 1.0:
+                        quality = "good"
+                    elif std_dev < 2.0:
+                        quality = "acceptable"
+                    else:
+                        quality = "poor"
+                    GEAR_RATIOS[gear] = round(mean_ratio, 1)
+                    save_gear_ratios(GEAR_RATIOS)
+                    CALIBRATION.update(active=False, gear=None, samples=[],
+                                      last_rpm=None, last_speed=None, last_throttle=None)
+                    self._json({"ok": True, "gear": gear,
+                               "ratio": round(mean_ratio, 1),
+                               "std_dev": round(std_dev, 2),
+                               "min": round(min_ratio, 1),
+                               "max": round(max_ratio, 1),
+                               "quality": quality,
+                               "all_ratios": GEAR_RATIOS})
+                elif action == "cancel":
+                    CALIBRATION.update(active=False, gear=None, samples=[])
+                    self._json({"ok": True})
+                elif action == "reset":
+                    GEAR_RATIOS.clear()
+                    GEAR_RATIOS.update(DEFAULT_GEAR_RATIOS)
+                    save_gear_ratios(GEAR_RATIOS)
+                    self._json({"ok": True, "ratios": GEAR_RATIOS})
+                elif action == "get":
+                    self._json({"ok": True, "ratios": GEAR_RATIOS,
+                               "calibrating": CALIBRATION["active"],
+                               "current_gear": CALIBRATION.get("gear"),
+                               "samples": len(CALIBRATION.get("samples", []))})
+                else:
+                    self._json({"error": "invalid action"}, 400)
+            # --- Additive analysis endpoints (Agent-2, Phases 5/6/7) ---
+            elif self.path == "/api/compare":
+                import compare as _cmp
+                b = self._body()
+                pa = os.path.join(HERE, os.path.basename(b.get("a", "")))
+                pb = os.path.join(HERE, os.path.basename(b.get("b", "")))
+                if not (os.path.isfile(pa) and os.path.isfile(pb)):
+                    return self._json({"error": "recording not found"}, 400)
+                self._json(_cmp.compare_recordings(pa, pb))
+            elif self.path == "/api/correlate":
+                import correlate as _corr
+                b = self._body()
+                p = os.path.join(HERE, os.path.basename(b.get("recording", "")))
+                if not os.path.isfile(p):
+                    return self._json({"error": "recording not found"}, 400)
+                try:
+                    self._json({"target": b.get("target"),
+                                "results": _corr.correlate_channels(
+                                    p, b.get("target"), top=b.get("top"))})
+                except KeyError as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/snapshot/create":
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                import snapshot as _snap
+                b = self._body()
+                with CAR_LOCK:
+                    snap = _snap.create_snapshot(
+                        ADAPTER, vin=getattr(ADAPTER, "vin", None),
+                        description=b.get("description", ""))
+                snap.pop("_dir", None)
+                self._json({"ok": True, "snapshot": snap})
+            elif self.path == "/api/snapshot/diff":
+                import snapshot as _snap
+                b = self._body()
+                try:
+                    self._json(_snap.diff_snapshots(b["a"], b["b"]))
+                except (KeyError, OSError) as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/ram/read":
+                # Read-only RAM explorer (Phase 7.1). E39/MS41 only.
+                b = self._body()
+                if not ADAPTER or getattr(ADAPTER, "proto", None) != "e39":
+                    return self._json({"error": "requires E39 (DS2) connection"}, 400)
+                ds2 = getattr(ADAPTER, "ds2", None)
+                width = int(b.get("width", 1))
+                with CAR_LOCK:
+                    if ds2 is None and hasattr(ADAPTER, "demo_ram_dump"):
+                        # demo: simulated RAM so the explorer flow is usable
+                        r = ADAPTER.demo_ram_dump(
+                            int(b.get("start", 0xDA28)), int(b.get("count", 16)))
+                    elif ds2 is None:
+                        return self._json({"error": "no DS2 handle"}, 400)
+                    elif "start" in b:
+                        r = ds2_diag.ram_dump_range(
+                            ds2, int(b["start"]), int(b.get("count", 16)), width)
+                    else:
+                        r = ds2_diag.ram_read(ds2, b.get("addresses", []), width)
+                if r is None:
+                    return self._json({"error": "no response from DME"}, 502)
+                self._json({"values": {f"0x{a:04X}": v for a, v in r.items()}})
+            elif self.path == "/api/ram/diff":
+                # Offline (Phase 7.3): diff two RAM dumps {hexaddr: value}.
+                b = self._body()
+                def _parse(d):
+                    return {int(k, 16) if isinstance(k, str) else k: v
+                            for k, v in (d or {}).items()}
+                self._json(ds2_diag.ram_diff(_parse(b.get("a")),
+                                             _parse(b.get("b")),
+                                             int(b.get("min_delta", 1))))
+            elif self.path == "/api/adaptations/reset":
+                # Phase 2. Real-car write is GATED (unconfirmed opcode);
+                # demo runs the full transaction flow.
+                import adaptations as _ad
+                b = self._body()
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                if not b.get("confirm"):
+                    return self._json({"error": "confirm required"}, 400)
+                with CAR_LOCK:
+                    self._json(_ad.reset_adaptations(
+                        ADAPTER, b.get("groups", []),
+                        user_note=b.get("note", "")))
+            elif self.path == "/api/actuator/test":
+                # Phase 3. Gated on real car; simulated in demo.
+                import actuators as _act
+                b = self._body()
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                with CAR_LOCK:
+                    self._json(_act.run_actuator_test(
+                        ADAPTER, b.get("test"), confirm=b.get("confirm")))
+            elif self.path == "/api/dev/raw":
+                # Phase 8. Read-only-whitelisted raw request console.
+                import dev_console as _dc
+                b = self._body()
+                if not ADAPTER:
+                    return self._json({"error": "not connected"}, 400)
+                with CAR_LOCK:
+                    self._json(_dc.send_raw(
+                        ADAPTER, b.get("payload", []),
+                        addr=int(b.get("addr", 0x12))))
+            elif self.path == "/api/engine/verify":
+                # Promote the current DME map sourced->verified. Requires
+                # plausible LIVE readings AND explicit user confirmation.
+                import verification
+                if not (ADAPTER and hasattr(ADAPTER, "engine_info")):
+                    return self._json({"error": "not connected"}, 400)
+                b = self._body()
+                vals = LIVE_LAST.get("values") or {}
+                if not vals:
+                    return self._json(
+                        {"error": "no live data — start live logging on a "
+                         "running engine first"}, 400)
+                info = ADAPTER.engine_info()
+                self._json(verification.record_verification(
+                    getattr(ADAPTER, "vin", "UNKNOWN"),
+                    info["dme"], info["engine"], vals,
+                    user_confirmed=bool(b.get("confirm")),
+                    note=b.get("note", "")))
+            elif self.path == "/api/trace/parse":
+                # Protocol Explorer: parse a K-line trace file (offline).
+                import trace as _tr
+                b = self._body()
+                p = os.path.join(HERE, os.path.basename(b.get("file", "")))
+                if not os.path.isfile(p):
+                    return self._json({"error": "trace file not found"}, 400)
+                frames = _tr.parse_trace(p)
+                self._json({"frames": len(frames),
+                            "requests": _tr.extract_requests(frames),
+                            "replay": _tr.replay_plan(frames)})
+            elif self.path == "/api/trace/diff":
+                # Diff two traces to find OEM-only operations (offline).
+                import trace as _tr
+                b = self._body()
+                pa = os.path.join(HERE, os.path.basename(b.get("a", "")))
+                pb = os.path.join(HERE, os.path.basename(b.get("b", "")))
+                if not (os.path.isfile(pa) and os.path.isfile(pb)):
+                    return self._json({"error": "trace file not found"}, 400)
+                self._json(_tr.trace_diff(_tr.parse_trace(pa),
+                                          _tr.parse_trace(pb)))
+            else:
+                self._json({"error": "not found"}, 404)
+        except Exception as e:
+            self._json({"error": str(e)}, 500)
+
+    def _sse_live(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        me = object()
+        LIVE_CLIENTS.add(me)
+        try:
+            last_sent = 0
+            while True:
+                if LIVE_LAST.get("t", 0) > last_sent:
+                    last_sent = LIVE_LAST["t"]
+                    msg = f"data: {json.dumps(LIVE_LAST)}\n\n"
+                    self.wfile.write(msg.encode())
+                    self.wfile.flush()
+                time.sleep(0.1)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            LIVE_CLIENTS.discard(me)
+
+
+def csv_writer_thread():
+    """Background thread: process CSV queue and write samples to disk.
+
+    This runs independently of the sampler thread, preventing disk I/O and event
+    detection from blocking live telemetry updates.
+    """
+    while True:
+        try:
+            t, values = CSV_QUEUE.get(timeout=1.0)
+            record_row(values)
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"CSV writer error: {e}")
+            time.sleep(0.1)
+
+
+def sampler():
+    """Background thread: poll live data while any SSE client is attached."""
+    global LIVE_LAST
+    while True:
+        if ADAPTER and (LIVE_CLIENTS or RECORDER["on"]):
+            try:
+                with CAR_LOCK:
+                    s = ADAPTER.live_sample()
+                # Detect pull state even when not recording (for UI indication)
+                pull_active = PULL_STATE["active"]
+                if s and not RECORDER["on"]:
+                    # Update pull detection state during live (non-recording) mode
+                    detect_pull(s)
+                # VANOS command-vs-response state (when S23 is in the profile)
+                vanos_event = None
+                if s and "S23" in s:
+                    state, ev = VANOS_MON.update(s)
+                    s["vanos_state"] = state
+                    if ev:
+                        vanos_event = log_vanos_event(ev, s)
+                # Evaluate health status
+                health = evaluate_health(s) if s else {}
+                LIVE_LAST = {"t": time.time(), "values": s,
+                             "ok": bool(s), "rec": RECORDER["count"]
+                             if RECORDER["on"] else None,
+                             "pull": PULL_STATE["active"],
+                             "pull_num": PULL_STATE["counter"] if PULL_STATE["active"] else None,
+                             "health": health,
+                             "vanos_event": vanos_event}
+                # Enqueue sample for CSV writer (non-blocking)
+                if s and RECORDER["on"]:
+                    try:
+                        CSV_QUEUE.put_nowait((time.time(), s))
+                    except queue.Full:
+                        pass  # Drop sample if queue full (unlikely with 1000 buffer)
+            except Exception as e:
+                LIVE_LAST = {"t": time.time(), "values": {}, "ok": False,
+                             "error": str(e)}
+                time.sleep(1.0)
+            time.sleep(0.02)
+        else:
+            time.sleep(0.3)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--port-http", type=int, default=8039)
+    ap.add_argument("--no-connect", action="store_true",
+                    help="start server without touching the car")
+    args = ap.parse_args()
+    if not args.no_connect:
+        a = connect("auto")
+        print(f"car: {a.name if a else 'not detected — connect via UI'}")
+    threading.Thread(target=csv_writer_thread, daemon=True).start()
+    threading.Thread(target=sampler, daemon=True).start()
+    srv = ThreadingHTTPServer(("127.0.0.1", args.port_http), Handler)
+    print(f"UI at http://localhost:{args.port_http}")
+    srv.serve_forever()
+
+
+if __name__ == "__main__":
+    main()
