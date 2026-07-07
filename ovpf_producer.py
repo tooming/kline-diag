@@ -31,9 +31,9 @@ import paths
 _WRITE_LOCK = threading.RLock()   # reentrant: record_* call ensure_passport
 
 VERSION = "0.1.0"
-PRODUCER = {"type": "Diagnostic", "name": "kline-diag", "version": VERSION,
+PRODUCER = {"type": "Diagnostic", "name": "opendiag", "version": VERSION,
             "device": "K+DCAN FTDI"}
-MANUAL = {"type": "Manual", "name": "kline-diag", "version": VERSION}
+MANUAL = {"type": "Manual", "name": "opendiag", "version": VERSION}
 
 
 # --- log location ----------------------------------------------------------

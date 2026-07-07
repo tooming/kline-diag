@@ -220,7 +220,7 @@ on every version tag. To build one yourself:
 
 ```sh
 pip install pyinstaller pywebview pyserial segno
-pyinstaller --noconfirm kline-diag.spec   # -> dist/OpenDiag.app (mac) or .exe (win)
+pyinstaller --noconfirm opendiag.spec   # -> dist/OpenDiag.app (mac) or .exe (win)
 ```
 
 The frozen app finds its bundled `ui.html`/JSON tables inside the bundle and

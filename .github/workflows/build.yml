@@ -35,7 +35,7 @@ jobs:
           pip install pyinstaller pywebview pyserial segno
 
       - name: Build frozen app
-        run: pyinstaller --noconfirm kline-diag.spec
+        run: pyinstaller --noconfirm opendiag.spec
 
       - name: Package artifact
         shell: bash

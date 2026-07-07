@@ -4,7 +4,7 @@
 Single source of truth for: canonicalization, event hashing, monotonic
 UUIDv7 ids, the event envelope, lock-guarded append, and the fold
 (seal/verify/merge/reduce). Both the reference CLI (`ovpf.py`) and the
-diagnostic app's producer (`kline-diag/ovpf_producer.py`, a vendored copy)
+diagnostic app's producer (`opendiag/ovpf_producer.py`, a vendored copy)
 import this, so there is exactly one implementation of the wire format.
 
 Stdlib only. Keep the two copies byte-identical (a golden-hash test guards
@@ -294,9 +294,17 @@ def reduce(events):
 
     for ev in live:
         t, d = ev.get("type"), ev.get("data", {})
+        p = ev.get("producer") or {}
         state["timeline"].append({
             "at": ev.get("occurredAt"), "type": t,
-            "producer": (ev.get("producer") or {}).get("name")})
+            "producer": p.get("name"),
+            # Domain-verified provenance (see docs/TRUST.md) -- stamped by
+            # a provider onto the event at write time, never client-
+            # asserted (see ovp-provider-aws/src/app.py's append_event).
+            # Surfaced here so any UI can show a "verified workshop" badge
+            # without re-deriving it from the raw producer object.
+            "producerDomain": p.get("domain"),
+            "producerVerified": bool(p.get("verified"))})
 
         od = _odometer_of(ev)
         if od and (state["mileage"] is None or od[0] > state["mileage"]["value"]):

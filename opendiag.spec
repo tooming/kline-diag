@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec — builds the desktop app frozen and self-contained.
 
-  pyinstaller --noconfirm kline-diag.spec
+  pyinstaller --noconfirm opendiag.spec
 
 Produces `dist/OpenDiag.exe` on Windows and `dist/OpenDiag.app` on macOS.
 The read-only tables + ui.html are bundled as data (found via
