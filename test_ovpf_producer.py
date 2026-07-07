@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""Tests for the OVPF producer + vendored core (stdlib unittest).
+
+Uses a temp data dir so it never touches real passport logs.
+"""
+import os
+import sys
+import tempfile
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import ovpf_core
+import ovpf_producer as prod
+
+# Wire-format fingerprint — MUST equal the ovp reference's golden hash, or the
+# vendored core has drifted and logs are no longer cross-compatible.
+GOLDEN_EVENT = {
+    "@context": ovpf_core.CONTEXT,
+    "id": "urn:uuid:018f3a1b-0000-7000-8000-0000000000aa",
+    "type": "PassportOpened", "specVersion": "0.1", "vehicle": "urn:ovpf:x",
+    "occurredAt": "2026-01-01T00:00:00Z", "recordedAt": "2026-01-01T00:00:00Z",
+    "producer": {"type": "Manual", "name": "t"},
+    "data": {"vehicle": {"type": "Vehicle", "vin": "ABC"}}}
+GOLDEN_HASH = "sha256:d0ffd8834939e26b423e12111dfbd606b0c228907c1268cc24c9c8f51335734f"
+
+
+class ProducerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        # redirect the passport dir into the temp dir
+        prod.paths.data_dir = lambda: self.tmp
+        self.vin = "TESTVIN0000000001"
+
+    def test_wire_format_golden_hash(self):
+        self.assertEqual(ovpf_core.event_hash(dict(GOLDEN_EVENT)), GOLDEN_HASH)
+
+    def test_auto_mint_passport_is_anonymous_uuid(self):
+        path, urn = prod.ensure_passport(self.vin)
+        self.assertTrue(urn.startswith("urn:ovpf:"))
+        self.assertTrue(os.path.exists(path))
+        # genesis carries VIN as data, not identity
+        first = ovpf_core.load(path)[0]
+        self.assertEqual(first["type"], "PassportOpened")
+        self.assertEqual(first["data"]["vehicle"]["vin"], self.vin)
+
+    def test_faults_then_clear_reduces_to_zero_open(self):
+        prod.record_faults(self.vin, 0x12, "DME", {
+            "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
+                                     "raw": "71"}]})
+        prod.record_clear(self.vin, 0x12, "DME")
+        state = prod.passport_state(self.vin)
+        self.assertEqual(state["open_faults"], [])
+        self.assertTrue(state["chain_ok"])
+
+    def test_faults_deduped(self):
+        r = {"ok": True, "entries": [{"code": "0x71", "text": "O2",
+                                      "status": "s", "raw": "71"}]}
+        self.assertIsNotNone(prod.record_faults(self.vin, 0x12, "DME", r))
+        self.assertIsNone(prod.record_faults(self.vin, 0x12, "DME", r))  # same -> skip
+
+    def test_vehicle_identified_deduped(self):
+        f = {"vin": self.vin, "engine": "M52B25"}
+        self.assertIsNotNone(prod.record_vehicle_identified(self.vin, f))
+        self.assertIsNone(prod.record_vehicle_identified(self.vin, f))
+
+    def test_coding_change_recorded(self):
+        prod.record_coding_change(self.vin, 0x80, "IKE", "4a0300", "4a0301",
+                                  preset="enable_12h")
+        state = prod.passport_state(self.vin)
+        self.assertEqual(len(state["coding_changes"]), 1)
+        self.assertEqual(state["coding_changes"][0]["after"], "4a0301")
+
+    def test_record_service_is_manual_producer(self):
+        ev = prod.record_service(self.vin, "Changed engine oil",
+                                  odometer=210500, price=45.0, currency="EUR")
+        self.assertEqual(ev["producer"]["type"], "Manual")
+        state = prod.passport_state(self.vin)
+        self.assertEqual(len(state["service_history"]), 1)
+        self.assertEqual(state["service_history"][0]["type"], "Changed engine oil")
+        self.assertEqual(state["mileage"], {"value": 210500, "unit": "KMT"})
+
+    def test_chain_is_maintained_across_appends(self):
+        prod.record_vehicle_identified(self.vin, {"vin": self.vin})
+        prod.record_faults(self.vin, 0x12, "DME", {
+            "ok": True, "entries": [{"code": "0x10", "text": "x", "status": "s",
+                                     "raw": "10"}]})
+        path = prod._log_path(self.vin)
+        self.assertEqual(ovpf_core.verify_chain(ovpf_core.load(path)), [])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

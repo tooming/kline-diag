@@ -3,7 +3,7 @@
 
   pyinstaller --noconfirm kline-diag.spec
 
-Produces `dist/KlineDiag.exe` on Windows and `dist/KlineDiag.app` on macOS.
+Produces `dist/OpenDiag.exe` on Windows and `dist/OpenDiag.app` on macOS.
 The read-only tables + ui.html are bundled as data (found via
 paths.resource_dir() -> sys._MEIPASS at runtime); writable data (logs,
 backups) goes to a per-user folder via paths.data_dir().
@@ -31,6 +31,7 @@ hiddenimports = [
     'actuators', 'compare', 'correlate', 'plugins', 'vehicle_profiles',
     'trace', 'dev_console', 'paths',
 ]
+hiddenimports += ['ovpf_core', 'ovpf_producer', 'segno']
 if sys.platform.startswith('win'):
     hiddenimports += ['serial', 'serial.tools.list_ports']
 
@@ -52,16 +53,16 @@ if sys.platform == 'darwin':
     # onedir + BUNDLE -> a proper .app (onefile .app clashes with Gatekeeper)
     exe = EXE(
         pyz, a.scripts, [], exclude_binaries=True,
-        name='KlineDiag', debug=False, strip=False, upx=False,
+        name='OpenDiag', debug=False, strip=False, upx=False,
         console=False, disable_windowed_traceback=False,
     )
     coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False,
-                   name='KlineDiag')
+                   name='OpenDiag')
     app = BUNDLE(
         coll,
-        name='KlineDiag.app',
+        name='OpenDiag.app',
         icon='app.icns',
-        bundle_identifier='com.tooming.klinediag',
+        bundle_identifier='com.tooming.opendiag',
         info_plist={
             'NSHighResolutionCapable': True,
             'LSMinimumSystemVersion': '10.13',
@@ -72,7 +73,7 @@ else:
     # Windows/Linux: single-file executable, easiest to hand over
     exe = EXE(
         pyz, a.scripts, a.binaries, a.datas, [],
-        name='KlineDiag', debug=False, bootloader_ignore_signals=False,
+        name='OpenDiag', debug=False, bootloader_ignore_signals=False,
         strip=False, upx=False, runtime_tmpdir=None,
         console=False, disable_windowed_traceback=False,
         icon='app.ico',

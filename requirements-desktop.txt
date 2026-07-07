@@ -3,3 +3,4 @@
 # On macOS pywebview uses the built-in WKWebView via pyobjc (pulled in
 # automatically). No Chromium is bundled.
 pywebview>=5.0
+segno>=1.6   # offline QR generation for the passport

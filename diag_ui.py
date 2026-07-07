@@ -32,6 +32,7 @@ import ds2_diag    # noqa: E402
 from power_diag import KLine, hexs, frame_payload, now  # noqa: E402
 from transaction import get_transaction_manager  # noqa: E402
 import coding  # noqa: E402
+import ovpf_producer  # noqa: E402  (OVPF event log; best-effort)
 
 # Read-only bundled resources (ui.html, *.json tables) vs. writable runtime
 # data (logs, backups, snapshots). Identical to the project dir when run from
@@ -164,7 +165,13 @@ class E39Adapter:
     name = "E39 (DS2 9600 8E1)"
     proto = "e39"
     modules = ds2_diag.E39_MODULES
-    vin = "WBAXXXXXXXXXXXXXX"  # TODO: Read from IKE or EWS
+    vin = "WBAXXXXXXXXXXXXXX"  # placeholder until a real read is confirmed
+
+    def read_vin(self):
+        """DS2 has no confirmed standard VIN job across this ECU set, so we
+        don't guess — keep the placeholder until a real read is verified.
+        (Read-only stub; returning None makes the caller keep `self.vin`.)"""
+        return None
 
     def __init__(self, profile="driveability"):
         self.kl = KLine(baud=ds2_diag.DS2_BAUD, parity="E",
@@ -337,6 +344,10 @@ class DemoAdapter(E39Adapter):
     """
     name = "DEMO — simulated 523i (no car)"
     proto = "e39"
+    vin = "WBADEMO5230DEMO01"          # obviously-fake demo VIN
+
+    def read_vin(self):
+        return self.vin
 
     # (ident hex, fault-entry-size, fault bytes) — real data from the car
     DEMO_MODULES = {
@@ -517,9 +528,31 @@ class E87Adapter:
     def detect(self):
         r = self.kl.fast_init(0x12)
         if r:
+            v = self.read_vin()          # while the session is live
+            if v:
+                self.vin = v
             self.kl.stop_comm(0x12)
             return True
         return False
+
+    def read_vin(self):
+        """VIN via KWP readECUIdentification (service 1A, identifier 90).
+
+        Read-only and best-effort: returns None if the DME doesn't answer,
+        so the caller keeps the placeholder. Not yet hardware-verified.
+        """
+        try:
+            frames = self.kl.request(b"\x1A\x90", 0x12, timeout=1.0)
+            for f in frames:
+                p = power_diag.frame_payload(f)
+                if p[:2] == b"\x5A\x90":     # positive response to 1A 90
+                    raw = bytes(p[2:]).decode("ascii", "ignore")
+                    vin = "".join(ch for ch in raw if ch.isalnum())
+                    if 11 <= len(vin) <= 17:
+                        return vin
+        except Exception:
+            pass
+        return None
 
     def scan(self):
         out = []
@@ -605,6 +638,16 @@ class E87Adapter:
 
 ADAPTER = None            # current protocol adapter
 ADAPTER_ERR = ""
+
+
+def _current_vin():
+    """VIN of the connected car, or None. A passport doesn't require a live
+    connection to exist or be viewed/logged to -- anonymous-first, VIN is
+    optional data, not identity (see ovpf_producer.ensure_passport). None
+    resolves to the single "unknown vin" passport, same as running this
+    tool with no car plugged in at all."""
+    return ADAPTER.vin if ADAPTER else None
+
 LIVE_CLIENTS = set()      # live SSE listeners exist -> sampler runs
 LIVE_LAST = {}
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
@@ -1041,6 +1084,11 @@ def connect(proto="auto"):
             if a.detect():
                 ADAPTER = a
                 ADAPTER_ERR = ""
+                # Passport is minted lazily -- first real recorded event
+                # (VehicleIdentified/faults/etc.) or the explicit "Create
+                # passport" button, never merely from a cable being plugged
+                # in (that also let Demo mode silently mint a passport for
+                # its fake VIN before any diagnostic actually happened).
                 return a
             a.close()
             errs.append(f"{cls.proto}: no response")
@@ -1073,7 +1121,45 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
 
+    def _raw(self, body, content_type, code=200):
+        if isinstance(body, str):
+            body = body.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
+        if self.path.startswith("/api/passport/qr"):
+            # Offline QR for the current passport (segno; graceful if absent).
+            st = ovpf_producer.passport_state(_current_vin())
+            if not st.get("passport"):
+                return self._json({"error": "no passport yet"}, 404)
+            try:
+                import io
+                import segno
+            except Exception:
+                return self._json(
+                    {"error": "QR unavailable (install segno)"}, 501)
+            uid = (st.get("passport_urn") or "").replace("urn:ovpf:", "")
+            # Same $OVPF_BASE_URL convention as the reference qr.py --
+            # openvehiclepassport.org (the old hardcoded default here)
+            # doesn't resolve to anything; found live generating a QR for
+            # a real passport and the domain wasn't even registered.
+            base_url = os.environ.get("OVPF_BASE_URL", "https://passport.skoor.ee")
+            payload = f"{base_url.rstrip('/')}/p/{uid}"
+            buf = io.BytesIO()
+            segno.make(payload, error="m").save(buf, kind="svg", scale=6,
+                                                border=2)
+            return self._raw(buf.getvalue(), "image/svg+xml")
+        if self.path.startswith("/api/passport"):
+            # Derived passport state + timeline (replay of the local log).
+            # No connection required to view -- see _current_vin().
+            try:
+                return self._json(ovpf_producer.passport_state(_current_vin()))
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
         if self.path in ("/", "/index.html"):
             with open(os.path.join(HERE, "ui.html"), "rb") as f:
                 data = f.read()
@@ -1402,6 +1488,14 @@ class Handler(BaseHTTPRequestHandler):
             import dme_registry
             info = ADAPTER.engine_info() if (ADAPTER and hasattr(
                 ADAPTER, "engine_info")) else None
+            if ADAPTER and info:
+                try:    # let the passport 'learn' the car (VehicleIdentified)
+                    ovpf_producer.record_vehicle_identified(ADAPTER.vin, {
+                        "vin": ADAPTER.vin,
+                        "engine": info.get("engine"),
+                        "dme": info.get("dme")})
+                except Exception:
+                    pass
             self._json({"detected": info,
                         "supported": dme_registry.all_engines()})
         elif self.path.startswith("/api/operations/summary"):
@@ -1456,7 +1550,14 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/faults":
                 addr = int(self._body()["addr"])
                 with CAR_LOCK:
-                    self._json(ADAPTER.faults(addr))
+                    res = ADAPTER.faults(addr)
+                try:    # append an OVPF DiagnosticTroubleCodeRead event
+                    ovpf_producer.record_faults(
+                        ADAPTER.vin, addr,
+                        ADAPTER.modules.get(addr, f"0x{addr:02X}"), res)
+                except Exception:
+                    pass
+                self._json(res)
             elif self.path == "/api/clear":
                 b = self._body()
                 addr = int(b["addr"])
@@ -1482,6 +1583,11 @@ class Handler(BaseHTTPRequestHandler):
                     # Keep old snapshot log for backwards compatibility
                     if result["success"]:
                         snapshot_faults(addr, result.get("write_result", {}))
+                        try:    # append an OVPF DiagnosticTroubleCodeCleared
+                            ovpf_producer.record_clear(
+                                ADAPTER.vin, addr, module_name)
+                        except Exception:
+                            pass
 
                     self._json(result)
             elif self.path == "/api/restore":
@@ -1627,6 +1733,15 @@ class Handler(BaseHTTPRequestHandler):
                     result["before"] = decoder.decode_coding(current_coding)
                     result["after"] = decoder.decode_coding(new_coding)
 
+                    if result.get("success"):
+                        try:    # append an OVPF EcuCodingChanged event
+                            ovpf_producer.record_coding_change(
+                                ADAPTER.vin, addr, module_name,
+                                current_coding.hex(), new_coding.hex(),
+                                preset=preset_id)
+                        except Exception:
+                            pass
+
                     self._json(result)
 
                 except Exception as e:
@@ -1725,6 +1840,14 @@ class Handler(BaseHTTPRequestHandler):
                     # Add before/after coding to result
                     result["before"] = decoder.decode_coding(current_coding)
                     result["after"] = decoder.decode_coding(new_coding)
+
+                    if result.get("success"):
+                        try:    # append an OVPF EcuCodingChanged event
+                            ovpf_producer.record_coding_change(
+                                ADAPTER.vin, addr, module_name,
+                                current_coding.hex(), new_coding.hex())
+                        except Exception:
+                            pass
 
                     self._json(result)
 
@@ -1833,6 +1956,15 @@ class Handler(BaseHTTPRequestHandler):
                     result["before"] = decoder.decode_coding(current_coding)
                     result["after"] = decoder.decode_coding(old_coding)
                     result["restored_from"] = operation_id
+
+                    if result.get("success"):
+                        try:    # append an OVPF EcuCodingChanged (restore)
+                            ovpf_producer.record_coding_change(
+                                ADAPTER.vin, addr, module_name,
+                                current_coding.hex(), old_coding.hex(),
+                                preset=f"restore:{operation_id}")
+                        except Exception:
+                            pass
 
                     self._json(result)
 
@@ -2094,6 +2226,43 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "trace file not found"}, 400)
                 self._json(_tr.trace_diff(_tr.parse_trace(pa),
                                           _tr.parse_trace(pb)))
+            elif self.path == "/api/passport/service":
+                # Manual maintenance fact, not diagnostic-derived (an oil
+                # change, a part swap) -- the one gap ovpf_producer had:
+                # everything else was ECU-observed, this is a person saying
+                # "this happened." No connection required -- see
+                # _current_vin().
+                b = self._body()
+                if not b.get("serviceType"):
+                    return self._json({"error": "serviceType required"}, 400)
+                ev = ovpf_producer.record_service(
+                    _current_vin(), b["serviceType"],
+                    odometer=b.get("odometer"),
+                    odometer_unit=b.get("odometerUnit", "KMT"),
+                    price=b.get("price"), currency=b.get("currency"),
+                    notes=b.get("notes"))
+                self._json(ev)
+            elif self.path == "/api/passport/create":
+                # Mint a passport with no live connection -- anonymous-first:
+                # "create = mint UUID -> QR -> sticker -> done." VIN is added
+                # as data later (a real connection, or edited by hand), never
+                # required up front.
+                path, urn = ovpf_producer.ensure_passport(_current_vin())
+                self._json(ovpf_producer.passport_state(_current_vin()))
+            elif self.path == "/api/passport/identify":
+                # Attach vehicle facts (VIN, make/model/year/engine) to a
+                # passport that was created without them. Appends
+                # VehicleIdentified -- reduce() merges it into state.vehicle,
+                # the PassportOpened genesis event is never touched. Same
+                # "person is asserting this" contract as /service: no
+                # connection required, see _current_vin().
+                b = self._body()
+                facts = {k: b[k] for k in ("vin", "make", "model", "modelYear", "engine")
+                          if b.get(k)}
+                if not facts:
+                    return self._json({"error": "at least one vehicle fact required"}, 400)
+                ev = ovpf_producer.record_vehicle_identified(_current_vin(), facts)
+                self._json(ev or {"note": "unchanged -- same facts already recorded"})
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as e:

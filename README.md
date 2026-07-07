@@ -1,4 +1,4 @@
-# kline-diag
+# OpenDiag
 
 K-line diagnostics for older BMWs (E39 / E87) using a cheap **K+DCAN USB
 cable** — no INPA, no Windows VM, no ELM327. An open, hackable alternative
@@ -219,8 +219,8 @@ built from source by GitHub Actions ([`.github/workflows/build.yml`](.github/wor
 on every version tag. To build one yourself:
 
 ```sh
-pip install pyinstaller pywebview pyserial
-pyinstaller --noconfirm kline-diag.spec   # -> dist/KlineDiag.app (mac) or .exe (win)
+pip install pyinstaller pywebview pyserial segno
+pyinstaller --noconfirm kline-diag.spec   # -> dist/OpenDiag.app (mac) or .exe (win)
 ```
 
 The frozen app finds its bundled `ui.html`/JSON tables inside the bundle and

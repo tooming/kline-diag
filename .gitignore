@@ -21,3 +21,6 @@ verified_maps.json
 drive_log_*.csv
 power_log_*.csv
 *.log
+
+# OVPF passport event logs (contain VIN / vehicle data)
+passports/

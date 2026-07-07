@@ -198,12 +198,13 @@
   <div>
     <div id="tabbar">
       <button class="tabbtn active" data-tabbtn="dashboard">Dashboard</button>
+      <button class="tabbtn" data-tabbtn="passport">Passport</button>
       <button class="tabbtn" data-tabbtn="diagnostics">Diagnostics</button>
       <button class="tabbtn" data-tabbtn="analysis">Analysis</button>
       <button class="tabbtn" data-tabbtn="service">Service</button>
       <button class="tabbtn" data-tabbtn="explorer">Explorer</button>
     </div>
-    <section data-tab="dashboard" id="dashboardsec" style="display:none">
+    <section data-tab="dashboard" id="dashboardsec">
       <h2>Dashboard</h2>
       <div id="vehicleinfo" style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px">
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:4px">VEHICLE</div>
@@ -241,7 +242,47 @@
         </div>
       </div>
     </section>
-    <section data-tab="analysis" id="snapshotsec" style="display:none">
+    <section data-tab="passport" id="passportsec">
+      <h2>Vehicle Passport</h2>
+      <div id="passportempty" class="muted">Connect to a vehicle to open its passport.</div>
+      <div id="passportbody" style="display:none">
+        <div class="row" style="gap:18px;align-items:flex-start;flex-wrap:wrap">
+          <div style="flex:1;min-width:240px">
+            <div id="pp_vehicle" style="font-size:19px;font-weight:600"></div>
+            <div id="pp_meta" class="muted" style="font-size:12px;margin:4px 0 12px"></div>
+            <div id="pp_stats" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+          </div>
+          <div style="text-align:center">
+            <div id="pp_qr" style="width:150px;height:150px;background:#fff;border-radius:8px;padding:6px;display:flex;align-items:center;justify-content:center"></div>
+            <div class="muted" style="font-size:10px;margin-top:4px">passport sticker (scan to open offline)</div>
+            <button id="pp_scan" style="font-size:11px;margin-top:6px">📷 Scan a sticker</button>
+          </div>
+        </div>
+        <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Vehicle info</h3>
+        <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="pp_vin" placeholder="VIN (optional)" style="flex:1;min-width:140px">
+          <input id="pp_make" placeholder="Make" style="width:100px">
+          <input id="pp_model" placeholder="Model" style="width:100px">
+          <input id="pp_year" placeholder="Year" style="width:70px">
+          <button id="pp_identify_btn">Save</button>
+        </div>
+        <div id="pp_identify_result" class="muted" style="font-size:11px;margin:4px 0 2px"></div>
+        <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Log a service</h3>
+        <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="pp_service_type" placeholder="e.g. Changed engine oil" style="flex:1;min-width:180px">
+          <input id="pp_service_odo" type="number" placeholder="odometer (km)" style="width:130px">
+          <button id="pp_service_btn">Log</button>
+        </div>
+        <div id="pp_service_result" class="muted" style="font-size:11px;margin:4px 0 2px"></div>
+        <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">History</h3>
+        <div id="pp_timeline"></div>
+        <div id="pp_scanwrap" style="display:none;margin-top:10px">
+          <video id="pp_video" autoplay playsinline muted style="width:260px;border-radius:8px;background:#000"></video>
+          <div id="pp_scanresult" class="muted" style="font-size:12px;margin-top:6px"></div>
+        </div>
+      </div>
+    </section>
+    <section data-tab="analysis" id="snapshotsec">
       <h2>Snapshots</h2>
       <div class="row" style="margin-bottom:8px">
         <input type="text" id="snapdesc" placeholder="Description (optional)" style="flex:1;padding:4px 8px;font-size:12px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;color:var(--fg)">
@@ -257,7 +298,7 @@
       </div>
       <div id="modules"><div class="muted">Not scanned yet.</div></div>
     </section>
-    <section data-tab="analysis" id="analysissec" style="display:none">
+    <section data-tab="analysis" id="analysissec">
       <h2>Analysis — Compare Drives</h2>
       <div class="row" style="flex-wrap:wrap;gap:6px">
         <select id="cmpA" style="font-size:12px;max-width:150px"></select>
@@ -267,7 +308,7 @@
       </div>
       <div id="cmpfindings" style="margin-top:8px"></div>
     </section>
-    <section data-tab="explorer" id="protocolsec" style="display:none">
+    <section data-tab="explorer" id="protocolsec">
       <h2>Protocol Explorer</h2>
       <div id="opsummary" class="muted" style="font-size:12px;margin-bottom:8px">-</div>
       <div class="row">
@@ -277,7 +318,7 @@
       <div id="opslist" style="max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;margin-top:6px"></div>
       <div class="muted" style="font-size:11px;margin-top:6px">Evidence grades: verified (implemented+tested) · observed (seen in a working tool) · documented (in a BMW SGBD job).</div>
     </section>
-    <section data-tab="explorer" id="devsec" style="display:none">
+    <section data-tab="explorer" id="devsec">
       <h2>Developer Mode</h2>
       <div style="padding:8px;background:var(--panel2);border:1px solid var(--warn);border-radius:6px;margin-bottom:8px;font-size:11px">
         ⚠️ <strong>Read-only console</strong> — only read services allowed. Write/actuate/clear services are blocked before the bus.
@@ -327,7 +368,7 @@
         Examples: <code>00</code> (ident), <code>04</code> (read faults), <code>0B 03</code> (status), <code>21 5A</code> (read data)
       </div>
     </section>
-    <section data-tab="explorer" id="ramsec" style="display:none">
+    <section data-tab="explorer" id="ramsec">
       <h2>RAM Explorer</h2>
       <div style="padding:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;margin-bottom:8px;font-size:11px">
         Read-only live memory viewer (E39/MS41, service 0B 01/00). Capture RAM at
@@ -384,7 +425,7 @@
       </div>
       <div id="ramdiffout" style="margin-top:6px"></div>
     </section>
-    <section data-tab="service" id="servicesec" style="display:none">
+    <section data-tab="service" id="servicesec">
       <h2>Service</h2>
       <div class="row">
         <button id="siabtn" class="danger">Reset oil service (SIA)</button>
@@ -429,7 +470,7 @@
       </div>
       <div id="replayevents" style="margin-top:10px"></div>
     </section>
-    <section data-tab="diagnostics" id="codingsec" style="display:none">
+    <section data-tab="diagnostics" id="codingsec">
       <h2>Coding</h2>
       <div class="row" style="margin-bottom:8px">
         <select id="codingmodule" style="font-size:12px;flex:1">
@@ -444,7 +485,7 @@
       <div id="codingstatus" class="muted">Select a module to read its coding.</div>
       <div id="codingdata" style="display:none;margin-top:10px"></div>
     </section>
-    <section data-tab="service" id="adaptationsec" style="display:none">
+    <section data-tab="service" id="adaptationsec">
       <h2>Adaptations</h2>
       <div style="padding:8px;background:var(--panel2);border:1px solid var(--warn);border-radius:6px;margin-bottom:8px;font-size:11px">
         ⚠️ <strong>Reset learned values</strong> — uses transaction layer (backup → reset → verify). ECU will relearn during next drive.
@@ -459,7 +500,7 @@
       <div id="adaptstatus" class="muted">Select a module to view adaptations.</div>
       <div id="adaptlist" style="display:none;margin-top:10px"></div>
     </section>
-    <section data-tab="service" id="actuatorsec" style="display:none">
+    <section data-tab="service" id="actuatorsec">
       <h2>Actuator Tests</h2>
       <div style="padding:8px;background:var(--panel2);border:1px solid var(--err);border-radius:6px;margin-bottom:8px;font-size:11px">
         ⚠️ <strong>DANGER:</strong> Activates physical outputs! Only test with engine off/ignition on unless specified. Emergency stop: turn ignition off.
@@ -561,6 +602,9 @@ function setState(s) {
   $("adaptationsec").style.display = s.protocol === "e39" && s.connected ? "" : "none"; // Show adaptations when E39 connected
   $("actuatorsec").style.display = s.protocol === "e39" && s.connected ? "" : "none"; // Show actuators when E39 connected
   $("dashboardsec").style.display = s.connected ? "" : "none";  // Show dashboard when connected
+  // Passport is anonymous-first: viewing/creating one never required a
+  // live connection at the API layer (see diag_ui.py's _current_vin()),
+  // so the tab shouldn't be gated behind one either.
   $("devsec").style.display = s.connected ? "" : "none";  // Show developer mode when connected
 
   // show profile selector only for E39
@@ -2735,7 +2779,145 @@ function showTab(name) {
     b.classList.toggle("active", b.dataset.tabbtn === name));
   document.querySelectorAll("section[data-tab]").forEach(sec =>
     sec.classList.toggle("tabhide", sec.dataset.tab !== name));
+  if (name === "passport") loadPassport();
 }
+
+// ---- Vehicle Passport (replay the local event log into a story) ----
+const PP_EVENT = {
+  PassportOpened:            ["🆕", "Passport created"],
+  VehicleIdentified:         ["🚗", "Vehicle identified"],
+  VehicleImported:           ["📥", "Vehicle imported"],
+  AccessGranted:             ["🔑", "Access granted"],
+  AccessRevoked:             ["🚫", "Access revoked"],
+  OwnershipTransferred:      ["🤝", "Ownership transferred"],
+  OdometerReading:           ["🧭", "Odometer reading"],
+  DiagnosticTroubleCodeRead: ["⚠️", "Fault codes read"],
+  DiagnosticTroubleCodeCleared: ["✅", "Faults cleared"],
+  EcuCodingChanged:          ["⚙️", "Coding changed"],
+  ServicePerformed:          ["🔧", "Service performed"],
+  PartReplaced:              ["🔩", "Part replaced"],
+  FuelAdded:                 ["⛽", "Fuel added"],
+  LiveDataRecorded:          ["📈", "Live data recorded"],
+  AiInsightGenerated:        ["🤖", "AI insight"],
+  NoteAdded:                 ["📝", "Note"],
+};
+function ppChip(label, value) {
+  return `<div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;min-width:70px">
+    <div class="muted" style="font-size:10px">${label}</div>
+    <div style="font-size:14px;font-weight:600">${value}</div></div>`;
+}
+async function loadPassport() {
+  const empty = $("passportempty"), body = $("passportbody");
+  const s = await api("/api/passport");
+  if (!s || !s.passport) {
+    // No passport minted yet for the current vin (or "no vin" if
+    // disconnected) -- anonymous-first: offer to create one right here,
+    // no live connection required.
+    empty.style.display = ""; body.style.display = "none";
+    empty.innerHTML = (s && s.error) ? s.error :
+      `<div style="margin-bottom:8px">No passport yet${state.connected ? "" : " (not connected -- that's fine, VIN is optional)"}.</div>
+       <button id="pp_create_btn">🆕 Create passport</button>
+       <div id="pp_create_result" class="muted" style="font-size:11px;margin-top:6px"></div>`;
+    const btn = $("pp_create_btn");
+    if (btn) btn.onclick = async () => {
+      btn.disabled = true;
+      const r = await api("/api/passport/create", {});
+      if (r && r.error) {
+        $("pp_create_result").textContent = r.error;
+        btn.disabled = false;
+        return;
+      }
+      loadPassport();
+    };
+    return;
+  }
+  empty.style.display = "none"; body.style.display = "";
+  const v = s.vehicle || {};
+  const desc = [v.modelYear, v.make, v.model].filter(Boolean).join(" ") || "Unknown vehicle";
+  $("pp_vehicle").textContent = desc + (v.engine ? ` · ${v.engine}` : "");
+  $("pp_meta").textContent = (v.vin ? `VIN ${v.vin}` : "no VIN yet") + " · " + (s.passport_urn || "");
+  const m = s.mileage;
+  $("pp_stats").innerHTML =
+    ppChip("Owner", s.owner ? "linked" : "you (local)") +
+    ppChip("Mileage", m ? `${m.value} km` : "—") +
+    ppChip("Open faults", (s.open_faults || []).length) +
+    ppChip("Events", s.event_count) +
+    ppChip("Integrity", s.chain_ok ? "✓ intact" : "✗ broken");
+  // QR of the passport sticker
+  $("pp_qr").innerHTML = `<img alt="passport QR" width="138" height="138" src="/api/passport/qr?t=${Date.now()}">`;
+  // Timeline: newest first, as a story
+  const tl = (s.timeline || []).slice().reverse();
+  $("pp_timeline").innerHTML = tl.length ? tl.map(e => {
+    const [icon, label] = PP_EVENT[e.type] || ["•", e.type];
+    const when = (e.at || "").replace("T", " ").slice(0, 16);
+    return `<div style="display:flex;gap:10px;padding:6px 4px;border-bottom:1px solid var(--line);font-size:13px">
+      <span style="font-size:16px">${icon}</span>
+      <span style="flex:1">${label}</span>
+      <span class="muted" style="font-size:11px">${e.producer || ""}</span>
+      <span class="muted" style="font-size:11px;min-width:104px;text-align:right">${when}</span></div>`;
+  }).join("") : '<div class="muted">No events yet — scan a module or read faults to start the history.</div>';
+}
+
+// QR scanning via the browser's native BarcodeDetector (offline, client-side)
+let ppStream = null;
+async function ppScan() {
+  const wrap = $("pp_scanwrap"), res = $("pp_scanresult"), video = $("pp_video");
+  if (ppStream) {  // toggle off
+    ppStream.getTracks().forEach(t => t.stop()); ppStream = null;
+    wrap.style.display = "none"; return;
+  }
+  if (!("BarcodeDetector" in window)) {
+    wrap.style.display = ""; res.textContent =
+      "This webview has no BarcodeDetector; on mobile/Chrome the camera scan works offline."; return;
+  }
+  try {
+    ppStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = ppStream; wrap.style.display = ""; res.textContent = "Point at a passport sticker…";
+    const det = new BarcodeDetector({ formats: ["qr_code"] });
+    const tick = async () => {
+      if (!ppStream) return;
+      try {
+        const codes = await det.detect(video);
+        if (codes.length) {
+          const raw = codes[0].rawValue;
+          const uuid = raw.split("/").pop().replace("urn:ovpf:", "");
+          res.innerHTML = `Opened passport <code>${uuid}</code>`;
+          ppStream.getTracks().forEach(t => t.stop()); ppStream = null;
+          setTimeout(() => { wrap.style.display = "none"; }, 2500);
+          return;
+        }
+      } catch (e) {}
+      requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) { res.textContent = "Camera unavailable: " + e.message; wrap.style.display = ""; }
+}
+$("pp_scan").onclick = ppScan;
+$("pp_identify_btn").onclick = async () => {
+  const result = $("pp_identify_result");
+  const facts = {
+    vin: $("pp_vin").value.trim(), make: $("pp_make").value.trim(),
+    model: $("pp_model").value.trim(), modelYear: $("pp_year").value.trim(),
+  };
+  if (!Object.values(facts).some(Boolean)) { result.textContent = "Enter at least one field."; return; }
+  const r = await api("/api/passport/identify", facts);
+  if (r.error) { result.textContent = "Error: " + r.error; return; }
+  result.textContent = "Saved.";
+  $("pp_vin").value = ""; $("pp_make").value = ""; $("pp_model").value = ""; $("pp_year").value = "";
+  loadPassport();
+};
+$("pp_service_btn").onclick = async () => {
+  const serviceType = $("pp_service_type").value.trim();
+  const result = $("pp_service_result");
+  if (!serviceType) { result.textContent = "Enter what was done first."; return; }
+  const odo = $("pp_service_odo").value;
+  const r = await api("/api/passport/service", {
+    serviceType, odometer: odo ? Number(odo) : undefined });
+  if (r.error) { result.textContent = "Error: " + r.error; return; }
+  result.textContent = "Logged.";
+  $("pp_service_type").value = ""; $("pp_service_odo").value = "";
+  loadPassport();
+};
 document.querySelectorAll("[data-tabbtn]").forEach(b =>
   b.onclick = () => showTab(b.dataset.tabbtn));
 showTab("dashboard");
