@@ -89,6 +89,45 @@ class ProducerTest(unittest.TestCase):
         path = prod._log_path(self.vin)
         self.assertEqual(ovpf_core.verify_chain(ovpf_core.load(path)), [])
 
+    def test_workshop_profile_set_get_clear(self):
+        self.assertIsNone(prod.get_workshop())
+        prod.set_workshop("Skoor Garage", "skoor.ee")
+        self.assertEqual(prod.get_workshop(), {"name": "Skoor Garage", "domain": "skoor.ee"})
+        prod.clear_workshop()
+        self.assertIsNone(prod.get_workshop())
+
+    def test_workshop_profile_attributes_diagnostic_and_manual_events(self):
+        prod.set_workshop("Skoor Garage", "skoor.ee")
+        fault_ev = prod.record_faults(self.vin, 0x12, "DME", {
+            "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
+                                     "raw": "71"}]})
+        service_ev = prod.record_service(self.vin, "Changed engine oil")
+        for ev in (fault_ev, service_ev):
+            self.assertEqual(ev["producer"]["type"], "Workshop")
+            self.assertEqual(ev["producer"]["name"], "Skoor Garage")
+            self.assertEqual(ev["producer"]["domain"], "skoor.ee")
+            self.assertNotIn("verified", ev["producer"])  # self-asserted, never claims verification
+
+    def test_workshop_profile_without_domain_omits_domain_field(self):
+        prod.set_workshop("Garage With No Website")
+        ev = prod.record_service(self.vin, "Changed engine oil")
+        self.assertEqual(ev["producer"]["type"], "Workshop")
+        self.assertNotIn("domain", ev["producer"])
+
+    def test_no_workshop_profile_keeps_existing_producers(self):
+        fault_ev = prod.record_faults(self.vin, 0x12, "DME", {
+            "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
+                                     "raw": "71"}]})
+        service_ev = prod.record_service(self.vin, "Changed engine oil")
+        self.assertEqual(fault_ev["producer"]["type"], "Diagnostic")
+        self.assertEqual(service_ev["producer"]["type"], "Manual")
+
+    def test_list_passports_includes_all_known_vehicles(self):
+        prod.record_vehicle_identified(self.vin, {"vin": self.vin})
+        prod.record_vehicle_identified("OTHERVIN00000002", {"vin": "OTHERVIN00000002"})
+        vins = {s["vehicle"].get("vin") for s in prod.list_passports()}
+        self.assertEqual(vins, {self.vin, "OTHERVIN00000002"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -199,6 +199,7 @@
     <div id="tabbar">
       <button class="tabbtn active" data-tabbtn="dashboard">Dashboard</button>
       <button class="tabbtn" data-tabbtn="passport">Passport</button>
+      <button class="tabbtn" data-tabbtn="workshop">Workshop</button>
       <button class="tabbtn" data-tabbtn="diagnostics">Diagnostics</button>
       <button class="tabbtn" data-tabbtn="analysis">Analysis</button>
       <button class="tabbtn" data-tabbtn="service">Service</button>
@@ -281,6 +282,18 @@
           <div id="pp_scanresult" class="muted" style="font-size:12px;margin-top:6px"></div>
         </div>
       </div>
+    </section>
+    <section data-tab="workshop" id="workshopsec">
+      <h2>Workshop</h2>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">
+        A self-asserted local identity -- no account, no cloud, no DNS
+        verification. Once set, every event you log (here or on the
+        Passport tab) is attributed to this workshop instead of left
+        anonymous.
+      </div>
+      <div id="ws_profile_box"></div>
+      <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Garage — vehicles worked on</h3>
+      <div id="ws_garage" class="muted">Loading…</div>
     </section>
     <section data-tab="analysis" id="snapshotsec">
       <h2>Snapshots</h2>
@@ -2780,6 +2793,7 @@ function showTab(name) {
   document.querySelectorAll("section[data-tab]").forEach(sec =>
     sec.classList.toggle("tabhide", sec.dataset.tab !== name));
   if (name === "passport") loadPassport();
+  if (name === "workshop") loadWorkshop();
 }
 
 // ---- Vehicle Passport (replay the local event log into a story) ----
@@ -2918,6 +2932,96 @@ $("pp_service_btn").onclick = async () => {
   $("pp_service_type").value = ""; $("pp_service_odo").value = "";
   loadPassport();
 };
+
+// ---- Workshop (local-only identity + garage of every scanned vehicle) ----
+function wsEsc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+async function loadWorkshopProfile() {
+  const box = $("ws_profile_box");
+  const { workshop } = await api("/api/workshop");
+  if (!workshop) {
+    box.innerHTML = `
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+        <input id="ws_name" placeholder="Workshop name" style="flex:1;min-width:160px">
+        <input id="ws_domain" placeholder="Domain (optional)" style="width:160px">
+        <button id="ws_setup_btn">Set up workshop</button>
+      </div>
+      <div id="ws_setup_result" class="muted" style="font-size:11px;margin-top:4px"></div>`;
+    $("ws_setup_btn").onclick = async () => {
+      const name = $("ws_name").value.trim();
+      const result = $("ws_setup_result");
+      if (!name) { result.textContent = "Enter a name."; return; }
+      const domain = $("ws_domain").value.trim();
+      const r = await api("/api/workshop/set", { name, domain });
+      if (r.error) { result.textContent = "Error: " + r.error; return; }
+      loadWorkshopProfile();
+    };
+    return;
+  }
+  box.innerHTML = `
+    <div>Signed in as <strong>${wsEsc(workshop.name)}</strong>${workshop.domain ? ` @ ${wsEsc(workshop.domain)}` : ""}
+      <button id="ws_clear_btn" style="margin-left:8px">Clear</button></div>
+    <div class="muted" style="font-size:11px;margin-top:4px">Self-asserted -- not domain-verified like a cloud-registered workshop.</div>`;
+  $("ws_clear_btn").onclick = async () => { await api("/api/workshop/clear", {}); loadWorkshopProfile(); };
+}
+async function loadGarage() {
+  const el = $("ws_garage");
+  const { vehicles, error } = await api("/api/garage");
+  if (error) { el.textContent = error; return; }
+  if (!vehicles || !vehicles.length) {
+    el.textContent = "No vehicles yet -- scan a car or create a passport to start the garage.";
+    return;
+  }
+  el.innerHTML = vehicles.slice().reverse().map((s, i) => {
+    const v = s.vehicle || {};
+    const desc = [v.modelYear, v.make, v.model].filter(Boolean).join(" ") || "Unknown vehicle";
+    const vin = v.vin || null;
+    const m = s.mileage;
+    const rowId = `wsrow${i}`;
+    return `<div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:600">${wsEsc(desc)}${v.engine ? ` · ${wsEsc(v.engine)}` : ""}</div>
+          <div class="muted" style="font-size:11px">${vin ? `VIN ${wsEsc(vin)}` : "no VIN"} · ${s.passport_urn || ""}</div>
+        </div>
+        <div style="display:flex;gap:10px;font-size:11px" class="muted">
+          <span>${m ? `${m.value} km` : "— km"}</span>
+          <span>${(s.open_faults || []).length} open fault(s)</span>
+          <span>${s.event_count} event(s)</span>
+          <span>${s.chain_ok ? "✓ intact" : "✗ broken"}</span>
+        </div>
+      </div>
+      ${vin ? `
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        <input id="${rowId}_type" placeholder="e.g. Changed engine oil" style="flex:1;min-width:160px">
+        <input id="${rowId}_odo" type="number" placeholder="odometer (km)" style="width:120px">
+        <button id="${rowId}_btn">Log</button>
+      </div>
+      <div id="${rowId}_result" class="muted" style="font-size:11px;margin-top:4px"></div>` :
+      `<div class="muted" style="font-size:11px;margin-top:8px">No VIN yet -- connect this vehicle to log against it from the Passport tab.</div>`}
+    </div>`;
+  }).join("");
+  vehicles.slice().reverse().forEach((s, i) => {
+    const vin = (s.vehicle || {}).vin;
+    if (!vin) return;
+    const rowId = `wsrow${i}`;
+    $(`${rowId}_btn`).onclick = async () => {
+      const serviceType = $(`${rowId}_type`).value.trim();
+      const result = $(`${rowId}_result`);
+      if (!serviceType) { result.textContent = "Enter what was done first."; return; }
+      const odo = $(`${rowId}_odo`).value;
+      const r = await api("/api/garage/service", {
+        vin, serviceType, odometer: odo ? Number(odo) : undefined });
+      if (r.error) { result.textContent = "Error: " + r.error; return; }
+      result.textContent = "Logged.";
+      loadGarage();
+    };
+  });
+}
+function loadWorkshop() { loadWorkshopProfile(); loadGarage(); }
+
 document.querySelectorAll("[data-tabbtn]").forEach(b =>
   b.onclick = () => showTab(b.dataset.tabbtn));
 showTab("dashboard");

@@ -63,6 +63,63 @@ def _last_event(path, etype):
     return found
 
 
+# --- workshop profile (local-only identity) --------------------------------
+# A self-asserted "I'm a workshop" identity, entirely local -- no DNS/OTP
+# verification like the cloud providers (see docs/TRUST.md), because
+# there's no server to verify against when running fully offline. Events
+# stamped under it never carry `verified: true`, so any UI (or a future
+# cloud sync) shows them as an unverified claim -- the same bucket as any
+# other self-reported producer, not silently upgraded to a "verified
+# workshop" badge just because someone edited this file.
+
+def _workshop_path():
+    return os.path.join(paths.data_dir(), "workshop.json")
+
+
+def get_workshop():
+    """The active local workshop profile ({"name": ..., "domain": ...}),
+    or None if nobody's set one (the common single-owner case)."""
+    try:
+        with open(_workshop_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+
+def set_workshop(name, domain=None):
+    profile = {"name": name, "domain": domain or None}
+    with open(_workshop_path(), "w", encoding="utf-8") as f:
+        json.dump(profile, f)
+    return profile
+
+
+def clear_workshop():
+    try:
+        os.remove(_workshop_path())
+    except FileNotFoundError:
+        pass
+
+
+def _producer(base):
+    """Attribute an event to the active workshop profile instead of
+    `base` (PRODUCER/MANUAL), keeping base's other metadata (version,
+    device). Mirrors the cloud providers: once signed in as a workshop,
+    every event logged is attributed to it automatically, not left as an
+    anonymous "Manual"/"Diagnostic" entry -- see
+    viewer/index.html's submitLogEvent."""
+    ws = get_workshop()
+    if not ws:
+        return base
+    producer = dict(base)
+    producer["type"] = "Workshop"
+    producer["name"] = ws["name"]
+    if ws.get("domain"):
+        producer["domain"] = ws["domain"]
+    else:
+        producer.pop("domain", None)
+    return producer
+
+
 def ensure_passport(vin):
     """Return (log_path, vehicle_urn), minting the passport on first use.
 
@@ -79,7 +136,7 @@ def ensure_passport(vin):
         if vin:
             vehicle["vin"] = vin
         ovpf_core.append(path, ovpf_core.envelope(
-            urn, "PassportOpened", {"vehicle": vehicle}, MANUAL))
+            urn, "PassportOpened", {"vehicle": vehicle}, _producer(MANUAL)))
         return path, urn
 
 
@@ -104,7 +161,7 @@ def record_faults(vin, addr, module_name, faults_result):
             if prev_codes == sorted(c["code"] for c in codes):
                 return None
         return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "DiagnosticTroubleCodeRead", data, PRODUCER))
+            urn, "DiagnosticTroubleCodeRead", data, _producer(PRODUCER)))
 
 
 def record_clear(vin, addr, module_name):
@@ -113,7 +170,7 @@ def record_clear(vin, addr, module_name):
     data = {"module": {"address": f"0x{addr:02X}", "name": module_name},
             "codesCleared": ["*"]}
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "DiagnosticTroubleCodeCleared", data, PRODUCER))
+        urn, "DiagnosticTroubleCodeCleared", data, _producer(PRODUCER)))
 
 
 def record_coding_change(vin, addr, module_name, before, after, preset=None):
@@ -124,7 +181,7 @@ def record_coding_change(vin, addr, module_name, before, after, preset=None):
     if preset:
         data["preset"] = preset
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "EcuCodingChanged", data, PRODUCER))
+        urn, "EcuCodingChanged", data, _producer(PRODUCER)))
 
 
 def record_vehicle_identified(vin, facts):
@@ -140,7 +197,7 @@ def record_vehicle_identified(vin, facts):
         if prev and prev.get("data", {}).get("vehicle", {}) == vehicle:
             return None
         return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "VehicleIdentified", {"vehicle": vehicle}, PRODUCER))
+            urn, "VehicleIdentified", {"vehicle": vehicle}, _producer(PRODUCER)))
 
 
 def record_odometer(vin, value, unit="KMT", source="obd"):
@@ -150,14 +207,15 @@ def record_odometer(vin, value, unit="KMT", source="obd"):
     path, urn = ensure_passport(vin)
     data = {"value": value, "unit": unit, "source": source}
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "OdometerReading", data, PRODUCER))
+        urn, "OdometerReading", data, _producer(PRODUCER)))
 
 
 def record_service(vin, service_type, odometer=None, odometer_unit="KMT",
                     price=None, currency=None, notes=None):
     """Append a `ServicePerformed` -- a manual maintenance fact (oil
-    change, part swap, etc.), producer type Manual, not Diagnostic:
-    this didn't come off the ECU, a person is asserting it happened."""
+    change, part swap, etc.), producer type Manual (or Workshop, if a
+    local workshop profile is active), not Diagnostic: this didn't come
+    off the ECU, a person is asserting it happened."""
     path, urn = ensure_passport(vin)
     data = {"serviceType": service_type}
     if odometer is not None:
@@ -167,7 +225,7 @@ def record_service(vin, service_type, odometer=None, odometer_unit="KMT",
     if notes:
         data["notes"] = notes
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "ServicePerformed", data, MANUAL))
+        urn, "ServicePerformed", data, _producer(MANUAL)))
 
 
 def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
@@ -179,7 +237,7 @@ def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
     if attachment_ref:
         data["attachmentRef"] = attachment_ref
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "LiveDataRecorded", data, PRODUCER))
+        urn, "LiveDataRecorded", data, _producer(PRODUCER)))
 
 
 def passport_state(vin):
@@ -190,6 +248,26 @@ def passport_state(vin):
     state["chain_ok"] = not ovpf_core.verify_chain(events)
     state["passport_urn"] = state.get("passport")
     return state
+
+
+def list_passports():
+    """Derived state for every local passport (one per known VIN, plus
+    the anonymous "unknown" one if it exists) -- powers the workshop
+    garage view: browse every vehicle worked on from this laptop, not
+    just whichever one is currently connected (see _current_vin())."""
+    out = []
+    for fname in sorted(os.listdir(_passports_dir())):
+        if not fname.endswith(".ovpf.ndjson"):
+            continue
+        path = os.path.join(_passports_dir(), fname)
+        events = ovpf_core.load(path)
+        if not events:
+            continue
+        state = ovpf_core.reduce(events)
+        state["chain_ok"] = not ovpf_core.verify_chain(events)
+        state["passport_urn"] = state.get("passport")
+        out.append(state)
+    return out
 
 
 if __name__ == "__main__":

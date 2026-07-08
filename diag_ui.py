@@ -1084,11 +1084,10 @@ def connect(proto="auto"):
             if a.detect():
                 ADAPTER = a
                 ADAPTER_ERR = ""
-                # Passport is minted lazily -- first real recorded event
-                # (VehicleIdentified/faults/etc.) or the explicit "Create
-                # passport" button, never merely from a cable being plugged
-                # in (that also let Demo mode silently mint a passport for
-                # its fake VIN before any diagnostic actually happened).
+                try:    # auto-mint the passport the moment we know the car
+                    ovpf_producer.ensure_passport(a.vin)
+                except Exception:
+                    pass
                 return a
             a.close()
             errs.append(f"{cls.proto}: no response")
@@ -1158,6 +1157,16 @@ class Handler(BaseHTTPRequestHandler):
             # No connection required to view -- see _current_vin().
             try:
                 return self._json(ovpf_producer.passport_state(_current_vin()))
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
+        if self.path == "/api/workshop":
+            return self._json({"workshop": ovpf_producer.get_workshop()})
+        if self.path == "/api/garage":
+            # Every vehicle this laptop has a passport for, not just
+            # whichever one is currently connected -- the workshop's
+            # "garage" view.
+            try:
+                return self._json({"vehicles": ovpf_producer.list_passports()})
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
         if self.path in ("/", "/index.html"):
@@ -2263,6 +2272,36 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "at least one vehicle fact required"}, 400)
                 ev = ovpf_producer.record_vehicle_identified(_current_vin(), facts)
                 self._json(ev or {"note": "unchanged -- same facts already recorded"})
+            elif self.path == "/api/workshop/set":
+                # Self-asserted local workshop identity -- no DNS/OTP, see
+                # ovpf_producer.get_workshop. Once set, every event logged
+                # (diagnostic or manual) is attributed to it instead of
+                # "Manual"/"Diagnostic".
+                b = self._body()
+                name = (b.get("name") or "").strip()
+                if not name:
+                    return self._json({"error": "name required"}, 400)
+                domain = (b.get("domain") or "").strip() or None
+                self._json({"workshop": ovpf_producer.set_workshop(name, domain)})
+            elif self.path == "/api/workshop/clear":
+                ovpf_producer.clear_workshop()
+                self._json({"workshop": None})
+            elif self.path == "/api/garage/service":
+                # Log a service against any vehicle in the garage, not
+                # just the one currently connected (see /api/passport/service
+                # for the connected-car equivalent).
+                b = self._body()
+                vin = (b.get("vin") or "").strip()
+                if not vin:
+                    return self._json({"error": "vin required"}, 400)
+                if not b.get("serviceType"):
+                    return self._json({"error": "serviceType required"}, 400)
+                ev = ovpf_producer.record_service(
+                    vin, b["serviceType"], odometer=b.get("odometer"),
+                    odometer_unit=b.get("odometerUnit", "KMT"),
+                    price=b.get("price"), currency=b.get("currency"),
+                    notes=b.get("notes"))
+                self._json(ev)
             else:
                 self._json({"error": "not found"}, 404)
         except Exception as e:
