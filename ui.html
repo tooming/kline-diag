@@ -319,6 +319,15 @@
         anonymous.
       </div>
       <div id="ws_profile_box"></div>
+      <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Cloud workshop sign-in</h3>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">
+        Separate from the local identity above: proves (via a one-time
+        email code) that you're currently signed in as someone at a
+        DNS-verified workshop domain on passport.skoor.ee. Needed to push
+        events attributed to that workshop -- being signed in with just
+        your personal email isn't enough for those specifically.
+      </div>
+      <div id="ws_cloud_box"></div>
       <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Garage — vehicles worked on</h3>
       <div id="ws_garage" class="muted">Loading…</div>
     </section>
@@ -3256,6 +3265,57 @@ async function loadWorkshopProfile() {
     <div class="muted" style="font-size:11px;margin-top:4px">Self-asserted -- not domain-verified like a cloud-registered workshop.</div>`;
   $("ws_clear_btn").onclick = async () => { await api("/api/workshop/clear", {}); loadWorkshopProfile(); };
 }
+async function loadWorkshopCloud() {
+  const box = $("ws_cloud_box");
+  const s = await api("/api/cloud/session");
+  const ws = s.workshop;
+  if (ws) {
+    box.innerHTML = `
+      <div>Signed in as workshop <strong>${wsEsc(ws.email || "")}</strong> @ ${wsEsc(ws.domain)}
+        ${ws.role ? ` (${wsEsc(ws.role)})` : ""}
+        <button id="ws_cloud_signout_btn" style="margin-left:8px">Sign out</button></div>
+      <div id="ws_cloud_status" class="muted" style="font-size:11px;margin-top:4px"></div>`;
+    $("ws_cloud_signout_btn").onclick = async () => {
+      await api("/api/cloud/workshop/signout", {});
+      loadWorkshopCloud();
+    };
+    return;
+  }
+  // Prefill from the local self-asserted profile's domain, if any -- the
+  // common case is signing in to the same domain already set up above.
+  const local = await api("/api/workshop");
+  const domainHint = (local.workshop && local.workshop.domain) || "";
+  box.innerHTML = `
+    <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+      <input id="ws_cloud_email" type="email" placeholder="${domainHint ? `you@${wsEsc(domainHint)}` : "you@yourdomain.com"}" style="flex:1;min-width:200px">
+      <button id="ws_cloud_otp_req_btn">Send code</button>
+    </div>
+    <div class="row" id="ws_cloud_code_row" style="display:none;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
+      <input id="ws_cloud_code" placeholder="code from email" style="width:140px">
+      <button id="ws_cloud_otp_verify_btn">Verify</button>
+    </div>
+    <div id="ws_cloud_status" class="muted" style="font-size:11px;margin-top:4px"></div>`;
+  $("ws_cloud_otp_req_btn").onclick = async () => {
+    const status = $("ws_cloud_status");
+    const email = $("ws_cloud_email").value.trim();
+    if (!email || !email.includes("@")) { status.textContent = "Enter a valid email first."; return; }
+    const domain = email.split("@")[1];
+    const r = await api("/api/cloud/workshop/otp/request", { domain, email });
+    if (r.error) { status.textContent = "Error: " + r.error; return; }
+    status.textContent = "Code sent — check your email.";
+    $("ws_cloud_code_row").style.display = "flex";
+  };
+  $("ws_cloud_otp_verify_btn").onclick = async () => {
+    const status = $("ws_cloud_status");
+    const email = $("ws_cloud_email").value.trim();
+    const domain = email.split("@")[1];
+    const code = $("ws_cloud_code").value.trim();
+    if (!code) { status.textContent = "Enter the code from the email."; return; }
+    const r = await api("/api/cloud/workshop/otp/verify", { domain, email, code });
+    if (r.error) { status.textContent = "Error: " + r.error; return; }
+    loadWorkshopCloud();
+  };
+}
 async function loadGarage() {
   const el = $("ws_garage");
   const { vehicles, error } = await api("/api/garage");
@@ -3325,7 +3385,7 @@ async function loadGarage() {
     };
   });
 }
-function loadWorkshop() { loadWorkshopProfile(); loadGarage(); }
+function loadWorkshop() { loadWorkshopProfile(); loadWorkshopCloud(); loadGarage(); }
 
 document.querySelectorAll("[data-tabbtn]").forEach(b =>
   b.onclick = () => showTab(b.dataset.tabbtn));
