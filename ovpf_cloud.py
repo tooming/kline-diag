@@ -251,6 +251,18 @@ def pull_passport(passport_id):
         raise CloudError("passport has no events yet")
     with open(path, "w", encoding="utf-8") as f:
         f.write(raw if raw.endswith("\n") else raw + "\n")
+    # Every event just came *from* this provider -- mark them all synced
+    # immediately, or sync_status/push_passport would see a brand new
+    # local file with no .ovpf.synced.json sibling yet and think all of
+    # them are pending, re-pushing everything right back. Found live: a
+    # real passport's event count doubled 40 -> 80 this way (the provider
+    # has since been hardened to be idempotent by event id too, but this
+    # client shouldn't be relying on that as its only safeguard).
+    try:
+        ids = {json.loads(line)["id"] for line in raw.splitlines() if line.strip()}
+        _save_synced_ids(path, ids)
+    except Exception:
+        pass
     return path
 
 
