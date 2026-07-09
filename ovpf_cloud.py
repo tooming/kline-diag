@@ -252,7 +252,12 @@ def push_passport(vin):
         sess = best_auth_session(ev.get("producer", {}).get("domain")) or session
         status, body = _request("POST", f"/v1/passports/{passport_id}/events",
                                 ev, token=sess["token"])
-        if status in (200, 201):
+        if status in (200, 201, 409):
+            # 409 = the provider already has this event (e.g. a previous
+            # push succeeded server-side but crashed/errored locally
+            # before the sync-tracking file was updated) -- same
+            # idempotent handling as ensure_registered's 409. Marking it
+            # synced here is what stops it being retried forever.
             synced.add(ev["id"])
             pushed += 1
         elif status in (401, 403):

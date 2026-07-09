@@ -140,6 +140,34 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(len(result["errors"]), 1)
 
+    def test_push_passport_treats_409_duplicate_as_synced(self):
+        """A 409 means the provider already has this event -- e.g. a
+        previous push succeeded server-side but the local sync-tracking
+        file didn't get updated (the bug this guards against: those
+        events used to be retried forever, always failing, and the UI's
+        "pending" count never went down)."""
+        prod.ensure_passport(self.vin)
+        prod.record_odometer(self.vin, 111)
+        cloud.set_user_session("me@example.com", "tok")
+
+        fake = FakeHttp([
+            (201, {"ok": True}),                              # register
+            (409, {"error": "event already exists"}),         # PassportOpened
+            (409, {"error": "event already exists"}),         # OdometerReading
+        ])
+        cloud._request = fake
+        result = cloud.push_passport(self.vin)
+        self.assertEqual(result["pushed"], 2)
+        self.assertEqual(result["errors"], [])
+
+        # and now they're marked synced -- a follow-up push doesn't retry them
+        fake2 = FakeHttp([])
+        cloud._request = fake2
+        result2 = cloud.push_passport(self.vin)
+        self.assertEqual(result2["pushed"], 0)
+        self.assertEqual(result2["skipped"], 2)
+        self.assertEqual(fake2.calls, [])
+
     def test_sync_status_reports_pending_count(self):
         prod.ensure_passport(self.vin)
         prod.record_odometer(self.vin, 1000)
