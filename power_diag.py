@@ -691,7 +691,7 @@ def mode_detail(kl, addr):
 
 
 def mode_probe_voltage(kl, target):
-    if not kl.fast_init(target):
+    if kl.fast_init(target) is None:
         sys.exit(f"No response from 0x{target:02X}")
     hits = {}
     for rid in range(0x00, 0x100):

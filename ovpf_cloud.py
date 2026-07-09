@@ -211,23 +211,27 @@ def _bare_id(vehicle_urn):
     return vehicle_urn[len(prefix):] if vehicle_urn.startswith(prefix) else vehicle_urn
 
 
-def _synced_path(vin):
-    log_path = ovpf_producer._log_path(vin)
+def _synced_path(log_path):
+    """Sibling of a resolved passport log path -- takes the actual path, not
+    a vin, so it always matches whichever file resolve_log_path() picked
+    (a passport opened before its VIN was known lives under "unknown", and
+    re-deriving from vin here would silently point at a different, empty
+    file -- see resolve_log_path)."""
     base = log_path[:-len(".ovpf.ndjson")] if log_path.endswith(".ovpf.ndjson") \
         else log_path
     return base + ".ovpf.synced.json"
 
 
-def _load_synced_ids(vin):
+def _load_synced_ids(log_path):
     try:
-        with open(_synced_path(vin), encoding="utf-8") as f:
+        with open(_synced_path(log_path), encoding="utf-8") as f:
             return set(json.load(f))
     except (FileNotFoundError, json.JSONDecodeError):
         return set()
 
 
-def _save_synced_ids(vin, ids):
-    with open(_synced_path(vin), "w", encoding="utf-8") as f:
+def _save_synced_ids(log_path, ids):
+    with open(_synced_path(log_path), "w", encoding="utf-8") as f:
         json.dump(sorted(ids), f)
 
 
@@ -239,30 +243,34 @@ def ensure_registered(passport_id, session):
     raise CloudError(body.get("error", f"HTTP {status}"))
 
 
-def sync_status(vin):
+def sync_status(vin, urn=None):
     """Local-only summary (no network) -- how many events are queued to
-    push next time, for the UI to show before the user commits to it."""
-    path = ovpf_producer._log_path(vin)
+    push next time, for the UI to show before the user commits to it.
+    Optional urn resolves a passport opened before its VIN was known (see
+    ovpf_producer.resolve_log_path) -- needed when browsing a garage
+    vehicle that isn't the connected car."""
+    path = ovpf_producer.resolve_log_path(vin, urn)
     events = ovpf_core.load(path)
-    synced = _load_synced_ids(vin)
+    synced = _load_synced_ids(path)
     pending = [ev for ev in events if ev["id"] not in synced]
     return {"total": len(events), "synced": len(events) - len(pending),
             "pending": len(pending),
             "signed_in": bool(get_user_session() or get_workshop_session())}
 
 
-def push_passport(vin):
+def push_passport(vin, urn=None):
     """Push every not-yet-synced event for this VIN's local passport to
     the cloud provider. Returns {"pushed", "skipped", "errors"}.
     Raises CloudError("not signed in...") if nobody's authenticated --
-    same gate the viewer's ensureRegistered() enforces."""
-    path = ovpf_producer._log_path(vin)
+    same gate the viewer's ensureRegistered() enforces. See sync_status()
+    for the urn parameter."""
+    path = ovpf_producer.resolve_log_path(vin, urn)
     events = ovpf_core.load(path)
     if not events:
         return {"pushed": 0, "skipped": 0, "errors": [],
                 "note": "no local passport for this VIN"}
     passport_id = _bare_id(events[0]["vehicle"])
-    synced = _load_synced_ids(vin)
+    synced = _load_synced_ids(path)
     to_send = [ev for ev in events if ev["id"] not in synced]
     if not to_send:
         return {"pushed": 0, "skipped": len(events), "errors": []}
@@ -328,6 +336,6 @@ def push_passport(vin):
         else:
             errors.append({"id": ev["id"],
                           "error": body.get("error", f"HTTP {status}")})
-    _save_synced_ids(vin, synced)
+    _save_synced_ids(path, synced)
     return {"pushed": pushed, "skipped": len(events) - len(to_send),
             "errors": errors}

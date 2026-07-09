@@ -16,8 +16,10 @@ memories are snapshotted to fault_snapshots.log before every clear.
 import argparse
 import collections
 import json
+import math
 import os
 import queue
+import urllib.parse
 import sys
 import threading
 import time
@@ -535,6 +537,10 @@ class E87Adapter:
          "group": "Temps/V", "graph": False},
         {"id": "maf", "label": "MAF", "unit": "g/s",
          "group": "Engine", "graph": True},
+        {"id": "power_kw", "label": "Power (est.)", "unit": "kW",
+         "group": "Engine", "graph": True},
+        {"id": "torque_nm", "label": "Torque (est.)", "unit": "Nm",
+         "group": "Engine", "graph": True},
         {"id": "timing_advance", "label": "Timing Advance", "unit": "°",
          "group": "Engine", "graph": False},
         {"id": "stft", "label": "Short Fuel Trim", "unit": "%",
@@ -561,7 +567,13 @@ class E87Adapter:
 
     def detect(self):
         r = self.kl.fast_init(0x12)
-        if r:
+        # r is False when the DME answers StartCommunication but refuses it
+        # (same "responded-but-refused" pattern as KOMBI, see CLAUDE.md) --
+        # it still serves requests, so only None (no answer at all) means
+        # truly unreachable. power_diag.py's scan_addr() uses the same
+        # is-None/is-False split; a plain `if r:` here previously treated
+        # the refusal as no response and made the whole app miss the car.
+        if r is not None:
             self.vin_suffix = self.read_vin_suffix()  # display-only partial
             v = self.read_vin()          # full VIN, if confirmed
             if v:
@@ -700,6 +712,20 @@ class E87Adapter:
             d = power_diag.obd_pid(self.kl, pid, 0x12, retries=0, timeout=0.3)
             if d:
                 s[chan_id] = round(obd2.decode_pid(pid, d), 2)
+        if "maf" in s:
+            # Rough MAF-based dyno estimate, not a calibrated measurement:
+            # HP ~= MAF(g/s) x 0.98 (rule-of-thumb VE-based conversion),
+            # kW = HP x 0.7457. Good enough to compare before/after a repair
+            # on the same car, not for absolute accuracy.
+            s["power_kw"] = round(s["maf"] * 0.98 * 0.7457, 1)
+            # Torque follows directly from power_kw + rpm (P = T * omega) --
+            # no separate calibration, just physics -- so it carries exactly
+            # the same uncertainty as power_kw above, no more/less. Only
+            # meaningful once the engine's actually turning.
+            rpm = s.get("rpm") or 0
+            if rpm > 50:
+                omega = rpm * 2 * math.pi / 60
+                s["torque_nm"] = round(s["power_kw"] * 1000 / omega, 1)
         if not s:
             self._live_init = False  # force re-init next time
         return s
@@ -717,12 +743,24 @@ def _current_vin():
     tool with no car plugged in at all."""
     return ADAPTER.vin if ADAPTER else None
 
+
+def _passport_url(urn):
+    """Public passport.skoor.ee URL for a passport urn, or None if unminted.
+    Same $OVPF_BASE_URL convention as the QR code (see do_GET) -- shared here
+    so the UI can render a clickable link without duplicating the base URL."""
+    if not urn:
+        return None
+    uid = urn.replace("urn:ovpf:", "")
+    base_url = os.environ.get("OVPF_BASE_URL", "https://passport.skoor.ee")
+    return f"{base_url.rstrip('/')}/p/{uid}"
+
 LIVE_CLIENTS = set()      # live SSE listeners exist -> sampler runs
 LIVE_LAST = {}
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
             "lock": threading.Lock()}
 CSV_QUEUE = queue.Queue(maxsize=1000)  # Buffer for CSV writer thread
 PULL_STATE = {"active": False, "counter": 0, "prev_rpm": 0}
+PULLS_LOG = []  # finished pulls this session: [{num, t_start, t_end, peaks}]
 
 
 class VanosMonitor:
@@ -1048,27 +1086,52 @@ def detect_pull(values):
     Start: throttle > 80%, load > 70%, RPM increasing
     End: throttle < 60% OR load < 50% (hysteresis to avoid flicker)
 
+    While a pull is active, tracks the running peak of every numeric channel
+    (not just throttle/load/rpm) so that e.g. peak power_kw/torque_nm/maf are
+    available too -- see PULL_STATE["peaks"]. On "end", the finished pull's
+    peaks are snapshotted into PULLS_LOG for the UI to list per-pull, so a
+    session with several pulls keeps each one's numbers instead of only the
+    single session-wide max.
+
     Returns: ("start", pull_number) | ("end", pull_number) | None
     """
-    # Extract values, handling different param IDs across profiles
-    throttle = values.get("P13", 0)  # Throttle
-    load = values.get("E2", 0)       # Load
-    rpm = values.get("P8", 0)        # RPM
+    # Extract values, handling different param IDs across profiles (E39 DS2
+    # MS41 profiles use P8/P13/E2; the E87 KWP2000 channels use the plain
+    # names -- same fallback pattern already used elsewhere in this file,
+    # e.g. record_row()'s gear estimate and evaluate_health()).
+    throttle = values.get("P13") or values.get("throttle") or 0
+    load = values.get("E2") or values.get("engine_load") or 0
+    rpm = values.get("P8") or values.get("rpm") or 0
 
     prev_rpm = PULL_STATE["prev_rpm"]
     PULL_STATE["prev_rpm"] = rpm
     rpm_increasing = rpm > prev_rpm + 100  # significant increase
+
+    if PULL_STATE["active"]:
+        peaks = PULL_STATE.setdefault("peaks", {})
+        for k, v in values.items():
+            if isinstance(v, (int, float)) and (k not in peaks or v > peaks[k]):
+                peaks[k] = v
 
     if not PULL_STATE["active"]:
         # Check for pull start
         if throttle > 80 and load > 70 and rpm_increasing:
             PULL_STATE["active"] = True
             PULL_STATE["counter"] += 1
+            PULL_STATE["peaks"] = {}
+            PULL_STATE["t_start"] = time.time()
             return ("start", PULL_STATE["counter"])
     else:
         # Check for pull end (hysteresis)
         if throttle < 60 or load < 50:
             PULL_STATE["active"] = False
+            PULLS_LOG.append({
+                "num": PULL_STATE["counter"],
+                "t_start": PULL_STATE.get("t_start"),
+                "t_end": time.time(),
+                "peaks": dict(PULL_STATE.get("peaks", {})),
+            })
+            del PULLS_LOG[:-50]  # cap; a session isn't going to need more
             return ("end", PULL_STATE["counter"])
 
     return None
@@ -1090,6 +1153,7 @@ def record_start():
         RECORDER.update(on=True, path=path, file=f, count=0, ids=ids)
         # Reset pull state when starting new recording
         PULL_STATE.update(active=False, counter=0, prev_rpm=0)
+        PULLS_LOG.clear()
         return path
 
 
@@ -1214,7 +1278,14 @@ class Handler(BaseHTTPRequestHandler):
         # /api/passport/qr is loaded via a plain <img src>, which can never
         # carry a custom header -- exempt it; it's read-only and not
         # sensitive (a QR code encoding a public passport URL).
-        if not self.path.startswith("/api/") or self.path.startswith("/api/passport/qr"):
+        # /api/live is opened via EventSource, which likewise can never carry
+        # a custom header -- exempt it too. It's GET-only/read-only telemetry;
+        # a cross-origin page can trigger the request but, same as the QR
+        # endpoint, this server never sends Access-Control-Allow-Origin, so
+        # the browser blocks it from reading the stream contents.
+        if (not self.path.startswith("/api/")
+                or self.path.startswith("/api/passport/qr")
+                or self.path == "/api/live"):
             return True
         return self.headers.get(_CLIENT_HEADER) == "1"
 
@@ -1245,12 +1316,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _qs_passport_state(self):
+        """?urn= or ?vin= query override for /api/passport(/qr) -- lets the
+        UI browse any garage vehicle's read-only passport view, not just the
+        connected car. ?urn= is preferred (the vehicle's actual stable
+        identity, see ovpf_producer.passport_state_by_urn) since a passport
+        opened before its VIN was known can't be found by VIN alone. Falls
+        back to the connected car's VIN (or None) when neither is given."""
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+        urn = (q.get("urn") or [""])[0].strip()
+        if urn:
+            return ovpf_producer.passport_state_by_urn(urn)
+        vin = (q.get("vin") or [""])[0].strip()
+        return ovpf_producer.passport_state(vin or _current_vin())
+
     def do_GET(self):
         if not self._csrf_ok():
             return self._json({"error": "forbidden"}, 403)
         if self.path.startswith("/api/passport/qr"):
             # Offline QR for the current passport (segno; graceful if absent).
-            st = ovpf_producer.passport_state(_current_vin())
+            st = self._qs_passport_state()
             if not st.get("passport"):
                 return self._json({"error": "no passport yet"}, 404)
             try:
@@ -1259,34 +1344,43 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 return self._json(
                     {"error": "QR unavailable (install segno)"}, 501)
-            uid = (st.get("passport_urn") or "").replace("urn:ovpf:", "")
-            # Same $OVPF_BASE_URL convention as the reference qr.py --
-            # openvehiclepassport.org (the old hardcoded default here)
-            # doesn't resolve to anything; found live generating a QR for
-            # a real passport and the domain wasn't even registered.
-            base_url = os.environ.get("OVPF_BASE_URL", "https://passport.skoor.ee")
-            payload = f"{base_url.rstrip('/')}/p/{uid}"
+            payload = _passport_url(st.get("passport_urn"))
             buf = io.BytesIO()
             segno.make(payload, error="m").save(buf, kind="svg", scale=6,
                                                 border=2)
             return self._raw(buf.getvalue(), "image/svg+xml")
         if self.path.startswith("/api/passport"):
             # Derived passport state + timeline (replay of the local log).
-            # No connection required to view -- see _current_vin().
+            # No connection required to view -- see _current_vin(). Optional
+            # ?urn=/?vin= lets the UI browse any garage vehicle's passport,
+            # not just the connected one -- see _qs_passport_state().
             try:
-                return self._json(ovpf_producer.passport_state(_current_vin()))
+                st = self._qs_passport_state()
+                st["url"] = _passport_url(st.get("passport_urn"))
+                return self._json(st)
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
         if self.path == "/api/workshop":
             return self._json({"workshop": ovpf_producer.get_workshop()})
-        if self.path == "/api/cloud/session":
+        if self.path == "/api/pulls":
+            # Finished pulls this session with their peak values -- see
+            # detect_pull(). Client polls this right after it sees the live
+            # "pull" flag drop, so a multi-pull session keeps every pull's
+            # numbers rather than just one running max.
+            return self._json({"pulls": PULLS_LOG})
+        if self.path.startswith("/api/cloud/session"):
             # Cloud sign-in status (separate from the local, self-asserted
-            # workshop profile above) + how many local events are queued
-            # to push for the current VIN, if any.
+            # workshop profile above) + how many local events are queued to
+            # push. Optional ?urn=/?vin= (see _qs_passport_state()) reports
+            # sync status for a browsed garage vehicle instead of the
+            # connected one.
             import ovpf_cloud
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            urn = (q.get("urn") or [""])[0].strip() or None
+            vin = (q.get("vin") or [""])[0].strip() or _current_vin()
             return self._json({"user": ovpf_cloud.get_user_session(),
                               "workshop": ovpf_cloud.get_workshop_session(),
-                              "sync": ovpf_cloud.sync_status(_current_vin())})
+                              "sync": ovpf_cloud.sync_status(vin, urn)})
         if self.path == "/api/garage":
             # Every vehicle this laptop has a passport for, not just
             # whichever one is currently connected -- the workshop's
@@ -1295,7 +1389,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"vehicles": ovpf_producer.list_passports()})
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
-        if self.path in ("/", "/index.html"):
+        # Query-stripped: a deep link like "/?passport=<id>" (see
+        # ui.html's openPassportByRef) must still serve the page, not 404 --
+        # the query string is read client-side from location.search.
+        if urllib.parse.urlsplit(self.path).path in ("/", "/index.html"):
             with open(os.path.join(HERE, "ui.html"), "rb") as f:
                 data = f.read()
             self.send_response(200)
@@ -2509,13 +2606,16 @@ class Handler(BaseHTTPRequestHandler):
                 ovpf_cloud.clear_workshop_session()
                 self._json({"workshop": None})
             elif self.path == "/api/cloud/push":
-                # Push the current (or an explicitly named, for the garage
-                # view) VIN's local passport events to the cloud provider.
+                # Push the current (or an explicitly named, for the garage/
+                # passport-browsing view) VIN's local passport events to the
+                # cloud provider. Optional urn resolves a passport opened
+                # before its VIN was known -- see ovpf_cloud.push_passport.
                 import ovpf_cloud
                 b = self._body()
                 vin = (b.get("vin") or "").strip() or _current_vin()
+                urn = (b.get("urn") or "").strip() or None
                 try:
-                    self._json(ovpf_cloud.push_passport(vin))
+                    self._json(ovpf_cloud.push_passport(vin, urn))
                 except ovpf_cloud.CloudError as e:
                     self._json({"error": str(e)}, 400)
             elif self.path == "/api/garage/service":

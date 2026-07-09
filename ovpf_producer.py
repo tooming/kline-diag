@@ -288,6 +288,56 @@ def passport_state(vin):
     return state
 
 
+def _path_for_urn(urn):
+    """Find a passport file by its vehicle urn rather than by VIN.
+
+    A passport opened before its VIN was known keeps living under the
+    "unknown" filename forever even after a later VehicleIdentified event
+    fills the VIN in -- _log_path(vin) is a naive direct lookup and misses
+    it. The urn (never the VIN, see module docstring) is the vehicle's
+    actual stable identity, so scanning for it always finds the right file
+    regardless of what it happened to be named at creation time."""
+    if not urn:
+        return None
+    for fname in os.listdir(_passports_dir()):
+        if not fname.endswith(".ovpf.ndjson"):
+            continue
+        path = os.path.join(_passports_dir(), fname)
+        first = _read_first(path)
+        if first and first.get("vehicle") == urn:
+            return path
+    return None
+
+
+def resolve_log_path(vin=None, urn=None):
+    """Resolve the right passport file for a vin and/or urn, preferring urn
+    (see _path_for_urn) since a passport opened before its VIN was known
+    can't be found by VIN alone. Falls back to the vin-keyed path (which
+    may not exist yet -- callers already treat a missing file as "no
+    events", same as before this existed). Used by ovpf_cloud too, so cloud
+    sync status/push are correct for a browsed (non-connected) vehicle."""
+    if urn:
+        p = _path_for_urn(urn)
+        if p:
+            return p
+    return _log_path(vin)
+
+
+def passport_state_by_urn(urn):
+    """Same shape as passport_state(), looked up by urn (see _path_for_urn)
+    -- for browsing a garage vehicle that isn't the connected car, where a
+    plain VIN lookup could silently miss it."""
+    path = _path_for_urn(urn)
+    if not path:
+        return {"passport": None, "vehicle": {}}
+    events = ovpf_core.load(path)
+    state = ovpf_core.reduce(events)
+    state["chain_ok"] = not ovpf_core.verify_chain(events)
+    state["passport_urn"] = state.get("passport")
+    state["name"] = get_vehicle_name(state["passport_urn"])
+    return state
+
+
 def list_passports():
     """Derived state for every local passport (one per known VIN, plus
     the anonymous "unknown" one if it exists) -- powers the workshop

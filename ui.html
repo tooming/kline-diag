@@ -62,6 +62,8 @@
   .tile .v { font-size: 22px; font-weight: 700;
              font-variant-numeric: tabular-nums; }
   .tile .l { color: var(--dim); font-size: 11px; white-space: nowrap; }
+  .tile .mm { color: var(--dim); font-size: 10px; white-space: nowrap;
+              font-variant-numeric: tabular-nums; margin-top: 1px; }
   canvas { width: 100%; height: 130px; background: var(--panel2);
            border: 1px solid var(--line); border-radius: 8px; }
   .chart-label { font-size: 12px; color: var(--dim); margin: 10px 0 4px; }
@@ -84,6 +86,14 @@
   .health-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
   .health-dot.green { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
   .health-dot.yellow { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .pull-row { display: flex; align-items: baseline; gap: 10px;
+              padding: 6px 10px; background: var(--panel);
+              border-radius: 6px; border: 1px solid var(--line);
+              flex-wrap: wrap; font-size: 12px; }
+  .pull-row .pnum { color: var(--accent); font-size: 13px; min-width: 20px; }
+  .pull-row .pv { font-variant-numeric: tabular-nums; }
+  .pull-row .pv .mv { color: var(--fg); font-size: 13px; font-weight: 600; }
+  .pull-row .pv .u { color: var(--dim); font-size: 10px; margin-left: 2px; }
   .health-dot.red { background: var(--err); box-shadow: 0 0 6px var(--err); }
   .health-dot.blue { background: #4da3ff; box-shadow: 0 0 6px #4da3ff; }
   .health-text { flex: 1; font-size: 12px; min-width: 0; }
@@ -245,6 +255,12 @@
     </section>
     <section data-tab="passport" id="passportsec">
       <h2>Vehicle Passport</h2>
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <input id="pp_open_ref" placeholder="Open by passport ID or URL (e.g. https://passport.skoor.ee/p/…)" style="flex:1;min-width:220px;font-size:12px">
+        <button id="pp_open_ref_btn" style="font-size:11px">Open</button>
+      </div>
+      <div id="pp_open_ref_result" class="muted" style="font-size:11px;margin:-4px 0 8px"></div>
+      <div id="pp_viewing_banner" style="display:none;background:var(--panel2);border:1px solid var(--accent);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px"></div>
       <div id="passportempty" class="muted">Connect to a vehicle to open its passport.</div>
       <div id="passportbody" style="display:none">
         <div class="row" style="gap:18px;align-items:flex-start;flex-wrap:wrap">
@@ -254,7 +270,8 @@
               <input id="pp_name" placeholder="Name this vehicle (e.g. &quot;The E39&quot;)" style="flex:1;min-width:160px;font-size:12px">
               <button id="pp_name_btn" style="font-size:11px">Save</button>
             </div>
-            <div id="pp_meta" class="muted" style="font-size:12px;margin:4px 0 12px"></div>
+            <div id="pp_meta" class="muted" style="font-size:12px;margin:4px 0 4px"></div>
+            <div id="pp_url" style="font-size:12px;margin:0 0 12px"></div>
             <div id="pp_stats" style="display:flex;gap:10px;flex-wrap:wrap"></div>
           </div>
           <div style="text-align:center">
@@ -263,6 +280,7 @@
             <button id="pp_scan" style="font-size:11px;margin-top:6px">📷 Scan a sticker</button>
           </div>
         </div>
+        <div id="pp_identify_section">
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Vehicle info</h3>
         <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
           <input id="pp_vin" placeholder="VIN (optional)" style="flex:1;min-width:140px">
@@ -272,6 +290,8 @@
           <button id="pp_identify_btn">Save</button>
         </div>
         <div id="pp_identify_result" class="muted" style="font-size:11px;margin:4px 0 2px"></div>
+        </div>
+        <div id="pp_service_section">
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Log a service</h3>
         <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
           <input id="pp_service_type" placeholder="e.g. Changed engine oil" style="flex:1;min-width:180px">
@@ -279,6 +299,7 @@
           <button id="pp_service_btn">Log</button>
         </div>
         <div id="pp_service_result" class="muted" style="font-size:11px;margin:4px 0 2px"></div>
+        </div>
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Cloud sync</h3>
         <div id="pp_cloud"></div>
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">History</h3>
@@ -561,6 +582,10 @@
           <div style="color:var(--dim);font-size:12px;padding:8px">Waiting for live data...</div>
         </div>
       </div>
+      <div id="pullspanel" class="health-panel" style="display:none">
+        <div style="font-size:11px;text-transform:uppercase;color:var(--dim);margin-bottom:8px;letter-spacing:0.05em">Pulls this session</div>
+        <div id="pullsgrid" class="health-grid"></div>
+      </div>
       <div id="tilegroups"></div>
       <div class="muted" style="margin-top:8px;font-size:12px">
         Click a tile to add/remove its graph.
@@ -593,6 +618,7 @@ const $ = id => document.getElementById(id);
 let state = { channels: [], protocol: null };
 let es = null, logSince = 0, charted = [], recOn = false;
 let sampleTimes = [];
+let lastPullActive = false, pulls = [];
 
 // Replay state
 let replayData = null;
@@ -1910,7 +1936,8 @@ function buildTiles() {
       d.className = "tile" + (charted.includes(ch.id) ? " charted" : "");
       d.id = "tilebox_" + ch.id;
       d.innerHTML = `<div class="v" id="tile_${ch.id}">—</div>
-                     <div class="l">${ch.label}${ch.unit ? " (" + ch.unit + ")" : ""}</div>`;
+                     <div class="l">${ch.label}${ch.unit ? " (" + ch.unit + ")" : ""}</div>
+                     <div class="mm" id="mm_${ch.id}"></div>`;
       d.onclick = () => toggleChart(ch.id);
       wrap.appendChild(d);
     }
@@ -1944,6 +1971,10 @@ function buildCharts() {
 
 // ---- history + charts ----
 const hist = {};
+// Session min/max per channel -- since the last "Start live" click, not just
+// the last 120s in `hist` (a pull can easily outlast the rolling chart
+// window, and the whole point is to catch the peak).
+const stats = {};
 function pushSample(values) {
   const tnow = Date.now() / 1000;
   sampleTimes.push(tnow);
@@ -1955,6 +1986,14 @@ function pushSample(values) {
       (hist[k] = hist[k] || []).push({ t: tnow, v: num });
       const cut = tnow - 120;
       while (hist[k].length && hist[k][0].t < cut) hist[k].shift();
+      const s = (stats[k] = stats[k] || { min: num, max: num });
+      if (num < s.min) s.min = num;
+      if (num > s.max) s.max = num;
+      const mm = $("mm_" + k);
+      if (mm) {
+        const dp = Math.abs(s.max - s.min) < 20 ? 1 : 0;
+        mm.textContent = `${s.min.toFixed(dp)} / ${s.max.toFixed(dp)}`;
+      }
     }
     const el = $("tile_" + k);
     if (el) {
@@ -1971,14 +2010,29 @@ function pushSample(values) {
   redraw();
 }
 
+// Grafana-style crosshair: hoverT is the hovered timestamp, shared across
+// every chart so moving the mouse over one graph shows the same instant
+// (vertical line + value) on all the others.
+let hoverT = null;
+function nearestPoint(pts, t) {
+  let lo = 0, hi = pts.length - 1;
+  if (t <= pts[0].t) return pts[0];
+  if (t >= pts[hi].t) return pts[hi];
+  while (lo < hi - 1) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid].t < t) lo = mid; else hi = mid;
+  }
+  return (t - pts[lo].t) < (pts[hi].t - t) ? pts[lo] : pts[hi];
+}
+
 function redraw() {
   for (const id of charted) {
     const cv = $("chart_" + id);
-    if (cv) drawChart(cv, hist[id] || []);
+    if (cv) drawChart(cv, hist[id] || [], id);
   }
 }
 
-function drawChart(cv, pts) {
+function drawChart(cv, pts, id) {
   const ctx = cv.getContext("2d");
   const W = cv.width = cv.clientWidth * devicePixelRatio;
   const H = cv.height = 130 * devicePixelRatio;
@@ -2007,6 +2061,72 @@ function drawChart(cv, pts) {
     i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
   }
   ctx.stroke();
+  // Crosshair: same hovered instant drawn on every chart, Grafana-style.
+  if (hoverT != null && hoverT >= t0 && hoverT <= t1) {
+    const np = nearestPoint(pts, hoverT);
+    const x = (np.t - t0) / 120 * W;
+    const y = H - (np.v - lo) / (hi - lo) * H;
+    ctx.strokeStyle = "#9aa4b2"; ctx.lineWidth = 1 * devicePixelRatio;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    ctx.fillStyle = "#4da3ff";
+    ctx.beginPath(); ctx.arc(x, y, 3 * devicePixelRatio, 0, 2 * Math.PI);
+    ctx.fill();
+    const ch = chanById(id);
+    const unit = ch && ch.unit ? " " + ch.unit : "";
+    const text = np.v.toFixed(Math.abs(hi - lo) < 20 ? 2 : 1) + unit;
+    ctx.font = `${11 * devicePixelRatio}px ui-monospace`;
+    const tw = ctx.measureText(text).width;
+    const pad2 = 4 * devicePixelRatio;
+    let lx = x + 6 * devicePixelRatio;
+    if (lx + tw + pad2 > W) lx = x - tw - 6 * devicePixelRatio - pad2;
+    const ly = 4 * devicePixelRatio;
+    ctx.fillStyle = "rgba(16,19,24,0.85)";
+    ctx.fillRect(lx - pad2 / 2, ly, tw + pad2, 14 * devicePixelRatio);
+    ctx.fillStyle = "#e6e9ee";
+    ctx.fillText(text, lx, ly + 11 * devicePixelRatio);
+  }
+}
+
+$("charts").addEventListener("mousemove", e => {
+  if (e.target.tagName !== "CANVAS") return;
+  const id = e.target.id.replace("chart_", "");
+  const pts = hist[id] || [];
+  if (pts.length < 2) return;
+  const rect = e.target.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const t1 = pts[pts.length - 1].t, t0 = t1 - 120;
+  hoverT = t0 + frac * (t1 - t0);
+  redraw();
+});
+$("charts").addEventListener("mouseleave", () => { hoverT = null; redraw(); });
+
+// ---- pulls (per-pull peaks, so a multi-pull session keeps every pull's
+// numbers instead of one running session-wide max) ----
+const PULL_DISPLAY = [
+  ["rpm", "RPM", "rpm", 0], ["P8", "RPM", "rpm", 0],
+  ["power_kw", "Power", "kW", 1], ["torque_nm", "Torque", "Nm", 1],
+  ["maf", "MAF", "g/s", 1], ["speed_kmh", "Speed", "km/h", 0],
+];
+function renderPulls(list) {
+  pulls = list || [];
+  const panel = $("pullspanel"), grid = $("pullsgrid");
+  if (!pulls.length) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  grid.innerHTML = pulls.slice().reverse().map(p => {
+    const chips = PULL_DISPLAY
+      .filter(([id]) => p.peaks && p.peaks[id] !== undefined)
+      .map(([id, label, unit, dp]) =>
+        `<span class="pv">${label} <span class="mv">${p.peaks[id].toFixed(dp)}</span><span class="u">${unit}</span></span>`)
+      .join("");
+    const dur = (p.t_start && p.t_end) ? `${(p.t_end - p.t_start).toFixed(1)}s` : "";
+    return `<div class="pull-row"><span class="pnum">#${p.num}</span>${
+      chips || '<span class="muted">no peak data</span>'
+    }<span class="muted" style="margin-left:auto;font-size:11px">${dur}</span></div>`;
+  }).join("");
+}
+async function loadPulls() {
+  const r = await api("/api/pulls");
+  if (r && r.pulls) renderPulls(r.pulls);
 }
 
 // ---- live stream ----
@@ -2014,6 +2134,11 @@ $("livebtn").onclick = () => {
   if (es) { es.close(); es = null;
     $("livebtn").textContent = "Start live";
     $("livestat").textContent = "stopped"; return; }
+  // Fresh min/max for this session -- a stale peak from an earlier pull
+  // would be misleading to see next to a brand new one.
+  for (const k of Object.keys(stats)) delete stats[k];
+  for (const el of document.querySelectorAll("[id^='mm_']")) el.textContent = "";
+  loadPulls();  // pick up any pulls already logged server-side this session
   es = new EventSource("/api/live");
   $("livebtn").textContent = "Stop live";
   $("livestat").textContent = "streaming…";
@@ -2031,6 +2156,10 @@ $("livebtn").onclick = () => {
       } else {
         pullBadge.style.display = "none";
       }
+      // A pull just finished (true -> false) -- pick up its peaks so a
+      // multi-pull session keeps every pull's numbers, not just the latest.
+      if (lastPullActive && !d.pull) loadPulls();
+      lastPullActive = !!d.pull;
       // Update health panel
       updateHealth(d.health || {});
       // VANOS command/response events (also persisted to vanos_events.log)
@@ -2845,9 +2974,66 @@ function ppChip(label, value) {
     <div style="font-size:14px;font-weight:600">${value}</div></div>`;
 }
 let ppCurrentUrn = null;
+// Set to browse a garage vehicle's passport that isn't the connected car
+// (see openPassportFor()); null means "whatever's connected right now".
+// Routing uses the urn (the vehicle's actual stable identity) since a
+// passport opened before its VIN was known can't be found by VIN alone --
+// see ovpf_producer.passport_state_by_urn. viewingVin is kept only for the
+// human-readable banner text and the "is this the connected car" check.
+let viewingVin = null, viewingUrn = null;
+function passportQS() {
+  return viewingUrn ? `?urn=${encodeURIComponent(viewingUrn)}` : "";
+}
+function openPassportFor(vin, urn) {
+  viewingVin = vin || null;
+  viewingUrn = urn || null;
+  showTab("passport");
+  loadPassport();
+}
+// Accepts what a user might actually paste: a full passport.skoor.ee URL,
+// a bare "urn:ovpf:<uuid>", or just the uuid itself (same three forms the
+// QR code and passport.skoor.ee/p/<uid> web view both round-trip through).
+// Returns a normalized "urn:ovpf:<uuid>" or null if it doesn't look like one.
+function parsePassportRef(raw) {
+  const s = (raw || "").trim();
+  if (!s) return null;
+  const uuid = s.split(/[\/?#]/).pop().replace(/^urn:ovpf:/, "").trim();
+  const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  return UUID_RE.test(uuid) ? `urn:ovpf:${uuid}` : null;
+}
+async function openPassportByRef(raw, resultEl) {
+  const urn = parsePassportRef(raw);
+  if (!urn) {
+    if (resultEl) resultEl.textContent = "Doesn't look like a passport ID or URL.";
+    return false;
+  }
+  openPassportFor(null, urn);
+  if (resultEl) resultEl.innerHTML = `Opened passport <code>${urn.replace("urn:ovpf:", "")}</code>`;
+  return true;
+}
+$("pp_open_ref_btn").onclick = () =>
+  openPassportByRef($("pp_open_ref").value, $("pp_open_ref_result"));
+$("pp_open_ref").addEventListener("keydown", e => {
+  if (e.key === "Enter") openPassportByRef($("pp_open_ref").value, $("pp_open_ref_result"));
+});
 async function loadPassport() {
   const empty = $("passportempty"), body = $("passportbody");
-  const s = await api("/api/passport");
+  const banner = $("pp_viewing_banner");
+  // Only a genuine mismatch counts as "browsing" -- if it happens to be the
+  // connected car's own VIN, treat it like the normal connected view (full
+  // write access, no banner).
+  const isOther = viewingVin && viewingVin !== state.vin;
+  if (isOther) {
+    banner.style.display = "";
+    banner.innerHTML = `Viewing <b>${wsEsc(viewingVin)}</b> (not the connected car) — read-only here.
+      <button id="pp_back_btn" style="font-size:11px;margin-left:8px">Back to connected car</button>`;
+    $("pp_back_btn").onclick = () => openPassportFor(null);
+  } else {
+    banner.style.display = "none";
+  }
+  $("pp_identify_section").style.display = isOther ? "none" : "";
+  $("pp_service_section").style.display = isOther ? "none" : "";
+  const s = await api("/api/passport" + passportQS());
   if (!s || !s.passport) {
     // No passport minted yet for the current vin (or "no vin" if
     // disconnected) -- anonymous-first: offer to create one right here,
@@ -2879,6 +3065,8 @@ async function loadPassport() {
   ppCurrentUrn = s.passport_urn || null;
   $("pp_meta").textContent = (s.name ? descFull + " · " : "") +
     (v.vin ? `VIN ${v.vin}` : "no VIN yet") + " · " + (s.passport_urn || "");
+  $("pp_url").innerHTML = s.url ?
+    `<a href="${wsEsc(s.url)}" target="_blank" rel="noopener">${wsEsc(s.url)}</a>` : "";
   const m = s.mileage;
   $("pp_stats").innerHTML =
     ppChip("Owner", s.owner ? "linked" : "you (local)") +
@@ -2887,7 +3075,7 @@ async function loadPassport() {
     ppChip("Events", s.event_count) +
     ppChip("Integrity", s.chain_ok ? "✓ intact" : "✗ broken");
   // QR of the passport sticker
-  $("pp_qr").innerHTML = `<img alt="passport QR" width="138" height="138" src="/api/passport/qr?t=${Date.now()}">`;
+  $("pp_qr").innerHTML = `<img alt="passport QR" width="138" height="138" src="/api/passport/qr${passportQS() ? passportQS() + "&" : "?"}t=${Date.now()}">`;
   // Timeline: newest first, as a story
   const tl = (s.timeline || []).slice().reverse();
   $("pp_timeline").innerHTML = tl.length ? tl.map(e => {
@@ -2906,7 +3094,7 @@ async function loadPassport() {
 async function loadCloudSync() {
   const box = $("pp_cloud");
   if (!box) return;
-  const s = await api("/api/cloud/session");
+  const s = await api("/api/cloud/session" + passportQS());
   const sync = s.sync || { total: 0, pending: 0, synced: 0 };
   const signedIn = s.user || s.workshop;
   if (!signedIn) {
@@ -2961,7 +3149,7 @@ async function loadCloudSync() {
   $("pp_cloud_push_btn").onclick = async () => {
     const btn = $("pp_cloud_push_btn"), status = $("pp_cloud_status");
     btn.disabled = true;
-    const r = await api("/api/cloud/push", {});
+    const r = await api("/api/cloud/push", { urn: viewingUrn });
     if (r.error) { status.textContent = "Error: " + r.error; btn.disabled = false; return; }
     status.textContent = `Pushed ${r.pushed} event(s).` +
       (r.errors && r.errors.length ? ` ${r.errors.length} failed.` : "");
@@ -2990,10 +3178,8 @@ async function ppScan() {
       try {
         const codes = await det.detect(video);
         if (codes.length) {
-          const raw = codes[0].rawValue;
-          const uuid = raw.split("/").pop().replace("urn:ovpf:", "");
-          res.innerHTML = `Opened passport <code>${uuid}</code>`;
           ppStream.getTracks().forEach(t => t.stop()); ppStream = null;
+          await openPassportByRef(codes[0].rawValue, res);
           setTimeout(() => { wrap.style.display = "none"; }, 2500);
           return;
         }
@@ -3098,6 +3284,7 @@ async function loadGarage() {
           <span>${s.chain_ok ? "✓ intact" : "✗ broken"}</span>
         </div>
       </div>
+      ${vin ? `<button id="${rowId}_view_btn" style="font-size:11px;margin-top:8px">📖 View passport</button>` : ""}
       <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
         <input id="${rowId}_name" placeholder="Name this vehicle" value="${wsEsc(s.name || "")}" style="flex:1;min-width:140px;font-size:12px">
         <button id="${rowId}_name_btn" style="font-size:11px">Save name</button>
@@ -3123,6 +3310,7 @@ async function loadGarage() {
     };
     const vin = (s.vehicle || {}).vin;
     if (!vin) return;
+    $(`${rowId}_view_btn`).onclick = () => openPassportFor(vin, urn);
     $(`${rowId}_btn`).onclick = async () => {
       const serviceType = $(`${rowId}_type`).value.trim();
       const result = $(`${rowId}_result`);
@@ -3142,7 +3330,15 @@ document.querySelectorAll("[data-tabbtn]").forEach(b =>
   b.onclick = () => showTab(b.dataset.tabbtn));
 showTab("dashboard");
 
-(async () => { setState(await api("/api/state")); pollLog(); })();
+(async () => {
+  setState(await api("/api/state"));
+  pollLog();
+  // Deep link: http://localhost:8039/?passport=<url-or-urn-or-id> jumps
+  // straight to that passport, same as opening passport.skoor.ee/p/<id> on
+  // the web -- see parsePassportRef().
+  const deepLink = new URLSearchParams(location.search).get("passport");
+  if (deepLink) await openPassportByRef(deepLink, $("pp_open_ref_result"));
+})();
 </script>
 </body>
 </html>
