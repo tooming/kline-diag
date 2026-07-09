@@ -507,15 +507,29 @@ def read_dtcs(kl, target):
     return None
 
 
-def read_ident(kl, target):
+def read_ident_parts(kl, target):
+    """KWP readECUIdentification (service 1A), tried across the common
+    identifiers (0x80 ident, 0x86/0x87 part numbers). Returns
+    (identifier, hex_str, ascii_str) for the first one that answers, or
+    None. Split out from read_ident() so callers that want the ASCII
+    (e.g. the dashboard's part-number column) don't have to re-parse its
+    formatted string."""
     for ident in (0x80, 0x86, 0x87):
         frames = kl.request(bytes([0x1A, ident]), target, timeout=0.6)
         for f in frames:
             p = frame_payload(f)
             if p[:1] == b"\x5A":
                 asc = "".join(chr(c) if 32 <= c < 127 else "." for c in p[2:])
-                return f"1A{ident:02X}: {hexs(p[2:])}  |{asc}|"
+                return ident, hexs(p[2:]), asc
     return None
+
+
+def read_ident(kl, target):
+    parts = read_ident_parts(kl, target)
+    if not parts:
+        return None
+    ident, hexstr, asc = parts
+    return f"1A{ident:02X}: {hexstr}  |{asc}|"
 
 
 # ---------------------------------------------------------------- modes

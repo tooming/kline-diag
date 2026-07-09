@@ -52,6 +52,25 @@ PROFILES = {
         },
         "notes": "KWP2000 fast-init. PID 0x42 unsupported; use record 21 5A.",
     },
+    "octavia_mk3": {
+        "chassis": "MQB (Typ 5E facelift)",
+        "name": "2019 Octavia",
+        "protocol": "uds_can",
+        "bitrate": 500000,
+        "vin_source": {"mode": 0x09, "pid": 0x02},
+        "voltage": {"kind": "obd_pid", "pid": 0x42, "scale": 1.0},
+        "modules": {
+            0x7E0: "engine (guaranteed present, legislated OBD-II)",
+        },
+        "notes": "CAN bus, not K-line — the K+DCAN cable cannot reach this "
+                 "car (no CAN transceiver); needs a slcan-firmware "
+                 "USB-CAN adapter (e.g. CANable 2.0). Module map beyond "
+                 "the engine ECU is NOT hardcoded here: VAG's non-emissions "
+                 "diagnostic addressing is typically routed through the "
+                 "J533 gateway and varies by options/model year, so use "
+                 "`vag_diag.py sweep` on the real car to discover it rather "
+                 "than trusting a guessed table.",
+    },
     # --- Template for adding a new chassis (needs the physical car to
     #     verify addresses before use). Kept commented so it is inert. ---
     # "e46": {
@@ -85,12 +104,14 @@ def validate_profile(p):
     for field in ("chassis", "name", "protocol", "modules"):
         if field not in p:
             problems.append(f"missing required field: {field}")
-    if p.get("protocol") not in ("ds2", "kwp2000"):
+    if p.get("protocol") not in ("ds2", "kwp2000", "uds_can"):
         problems.append(f"unknown protocol: {p.get('protocol')}")
     if not isinstance(p.get("modules"), dict) or not p.get("modules"):
         problems.append("modules must be a non-empty {addr: name} dict")
+    # K-line addresses are one byte; CAN IDs (uds_can) are 11-bit.
+    addr_max = 0x7FF if p.get("protocol") == "uds_can" else 0xFF
     for a in (p.get("modules") or {}):
-        if not isinstance(a, int) or not 0 <= a <= 0xFF:
+        if not isinstance(a, int) or not 0 <= a <= addr_max:
             problems.append(f"invalid module address: {a!r}")
     return problems
 

@@ -31,7 +31,7 @@ def test_ram_diff_threshold():
 
 
 def test_profiles_valid():
-    for key in ("e39", "e87"):
+    for key in ("e39", "e87", "octavia_mk3"):
         p = vp.get_profile(key)
         assert p is not None
         assert vp.validate_profile(p) == [], vp.validate_profile(p)
@@ -41,7 +41,7 @@ def test_profiles_valid():
 def test_profile_lookup():
     assert "DME" in vp.module_name("e39", 0x12)
     assert vp.get_profile("nonexistent") is None
-    assert len(vp.list_profiles()) == 2
+    assert len(vp.list_profiles()) == 3
     print("test_profile_lookup OK")
 
 

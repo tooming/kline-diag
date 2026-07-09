@@ -107,6 +107,48 @@ Addresses 0xE9–0xEF are aliases of other modules and are excluded from scans.
 - **KOMBI "refused init"**: normal, it answers anyway.
 - **`7F xx 78` in raw output**: "response pending" — handled, not an error.
 
+## Bonus: VW Group CAN/UDS support (`vag_diag.py`)
+
+Modern VAG cars — this covers a **2019 Skoda Octavia (Mk3/MQB)** — don't
+have K-line at all; every module is on the CAN bus and speaks UDS
+(ISO 14229) over ISO-TP (ISO 15765-2). The K+DCAN cable **cannot** be
+reused here (no CAN transceiver, and MQB cars don't wire K-line to any
+module). You need a CAN-capable adapter instead — a **CANable 2.0-class
+USB-CAN adapter running the stock slcan firmware** (~€15-20) is the
+recommended fit: it enumerates as a plain `/dev/cu.usbmodem*` serial port
+on macOS, no drivers, and speaks a simple ASCII protocol implemented here
+stdlib-only (`can_transport.py`), same philosophy as the K-line tools.
+
+```sh
+python3 vag_diag.py probe    # bus alive? (Mode 01 PID 00 broadcast)
+python3 vag_diag.py pids     # supported Mode-01 live-data PIDs
+python3 vag_diag.py vin      # VIN via Mode 09
+python3 vag_diag.py dtc      # stored DTCs (legislated OBD-II layer, safe)
+python3 vag_diag.py scan     # dtc, plus an experimental UDS module sweep
+python3 vag_diag.py clear    # clear DTCs; snapshots fault memory first
+python3 vag_diag.py monitor  # RPM/speed/coolant/voltage -> console + CSV
+python3 vag_diag.py sweep    # probe 0x700-0x7FF for non-emissions modules
+```
+
+Two layers, deliberately kept separate:
+
+- **`obd2.py`** — legacy SAE J1979 Mode 01/03/04/09 over the standard
+  functional CAN IDs (`0x7DF` request, `0x7E8-0x7EF` responses). This is
+  legislated and universal on every OBD-II car, so `dtc`/`clear`/`monitor`/
+  `vin`/`pids` work without knowing anything VAG-specific.
+- **`uds.py`** — full ISO 14229 services (session control, arbitrary
+  `ReadDataByIdentifier`, DTCs by status mask) for the engine ECU and any
+  module `sweep` finds. VAG's non-emissions module addressing is usually
+  routed through the J533 gateway and isn't reliably knowable without the
+  physical car — `sweep` probes candidate CAN IDs directly (same idea as
+  `power_diag.py sweep` for unknown BMW module addresses) rather than
+  trusting a guessed table. Confirmed addresses belong in
+  `vehicle_profiles.py`'s `octavia_mk3` entry once verified on the car.
+
+`--raw` prints every SLCAN line on the wire; all traffic is appended to
+`can_raw.log`. `clear` auto-snapshots fault memory to `fault_snapshots.log`
+first, same as the BMW tools — never clear without that evidence captured.
+
 ## Bonus: DS2 support for pre-2001 BMWs (`ds2_diag.py`)
 
 Older BMWs (E39/E38/E36 era) don't speak KWP2000 — they use **DS2**

@@ -29,6 +29,7 @@ sys.path.insert(0, HERE)
 import paths  # noqa: E402
 import power_diag  # noqa: E402
 import ds2_diag    # noqa: E402
+import obd2        # noqa: E402  (shared Mode-01 PID decode formulas)
 from power_diag import KLine, hexs, frame_payload, now  # noqa: E402
 from transaction import get_transaction_manager  # noqa: E402
 import coding  # noqa: E402
@@ -515,7 +516,31 @@ class E87Adapter:
          "group": "Engine", "graph": True},
         {"id": "coolant_c", "label": "Coolant", "unit": "°C",
          "group": "Temps/V", "graph": False},
+        {"id": "speed_kmh", "label": "Speed", "unit": "km/h",
+         "group": "Engine", "graph": True},
+        {"id": "engine_load", "label": "Engine Load", "unit": "%",
+         "group": "Engine", "graph": True},
+        {"id": "throttle", "label": "Throttle", "unit": "%",
+         "group": "Engine", "graph": True},
+        {"id": "iat_c", "label": "Intake Air", "unit": "°C",
+         "group": "Temps/V", "graph": False},
+        {"id": "maf", "label": "MAF", "unit": "g/s",
+         "group": "Engine", "graph": True},
+        {"id": "timing_advance", "label": "Timing Advance", "unit": "°",
+         "group": "Engine", "graph": False},
+        {"id": "stft", "label": "Short Fuel Trim", "unit": "%",
+         "group": "Fuel", "graph": False},
+        {"id": "ltft", "label": "Long Fuel Trim", "unit": "%",
+         "group": "Fuel", "graph": False},
     ]
+    # PIDs confirmed supported by this car's DME (power_diag.py pids output);
+    # channel id -> Mode-01 PID, decoded via obd2.decode_pid (same SAE J1979
+    # formulas the CAN/UDS Octavia code uses — PID math is transport-agnostic).
+    _PID_CHANNELS = {
+        "rpm": 0x0C, "coolant_c": 0x05, "speed_kmh": 0x0D,
+        "engine_load": 0x04, "throttle": 0x11, "iat_c": 0x0F, "maf": 0x10,
+        "timing_advance": 0x0E, "stft": 0x06, "ltft": 0x07,
+    }
 
     def __init__(self):
         self.kl = KLine(rawlog_path=os.path.join(DATA, "kline_raw.log"))
@@ -561,9 +586,11 @@ class E87Adapter:
             r = self.kl.fast_init(addr)
             if r is None:
                 continue
-            ident = power_diag.read_ident(self.kl, addr) or ""
+            parts = power_diag.read_ident_parts(self.kl, addr)
+            ident = f"1A{parts[0]:02X}: {parts[1]}  |{parts[2]}|" if parts else ""
+            ident_ascii = parts[2].strip(".") if parts else ""
             out.append({"addr": addr, "name": name, "ident": ident,
-                        "ident_ascii": ""})
+                        "ident_ascii": ident_ascii})
             self.kl.stop_comm(addr)
         return out
 
@@ -625,12 +652,10 @@ class E87Adapter:
             p = frame_payload(f)
             if p[:1] == b"\x61" and len(p) > 2:
                 s["battery_v"] = round(p[2] * 0.1, 1)
-        d = power_diag.obd_pid(self.kl, 0x0C, 0x12, retries=1)
-        if d and len(d) >= 2:
-            s["rpm"] = round(((d[0] << 8) | d[1]) / 4)
-        d = power_diag.obd_pid(self.kl, 0x05, 0x12, retries=1)
-        if d:
-            s["coolant_c"] = d[0] - 40
+        for chan_id, pid in self._PID_CHANNELS.items():
+            d = power_diag.obd_pid(self.kl, pid, 0x12, retries=0, timeout=0.3)
+            if d:
+                s[chan_id] = round(obd2.decode_pid(pid, d), 2)
         if not s:
             self._live_init = False  # force re-init next time
         return s
@@ -846,8 +871,8 @@ def evaluate_health(values):
 
     # Extract common values (handle both E39 and E87 parameter names)
     rpm = values.get("P8") or values.get("rpm")
-    speed_kmh = values.get("P9")  # E87 doesn't log speed
-    throttle = values.get("P13", 0)
+    speed_kmh = values.get("P9") or values.get("speed_kmh")
+    throttle = values.get("P13") or values.get("throttle") or 0
     coolant = values.get("P2") or values.get("coolant_c")
     v_batt = values.get("P17") or values.get("battery_v")
 
@@ -879,8 +904,10 @@ def evaluate_health(values):
         else:
             health["coolant"] = {"color": "red", "text": "Overheating", "value": f"{coolant:.0f}°C"}
 
-    # Intake air temp (P11)
+    # Intake air temp (P11 or E87 iat_c)
     iat = values.get("P11")
+    if iat is None:
+        iat = values.get("iat_c")
     if iat is not None:
         if iat < 45:
             health["iat"] = {"color": "green", "text": "IAT good", "value": f"{iat:.0f}°C"}
@@ -889,12 +916,17 @@ def evaluate_health(values):
         else:
             health["iat"] = {"color": "red", "text": "IAT hot", "value": f"{iat:.0f}°C"}
 
-    # Fuel trims (E13, E14, E21, E22)
+    # Fuel trims (E39 RAM params E13/E14/E21/E22, or E87 OBD PID 06/07 —
+    # the +/-5% / +/-10% bands are generic OBD-II tuning guidance, not
+    # engine-specific, so the same thresholds apply to both).
     stft1 = values.get("E13")
     stft2 = values.get("E14")
     ltft1 = values.get("E21")
     ltft2 = values.get("E22")
-    trims = [t for t in [stft1, stft2, ltft1, ltft2] if t is not None]
+    e87_stft = values.get("stft")
+    e87_ltft = values.get("ltft")
+    trims = [t for t in [stft1, stft2, ltft1, ltft2, e87_stft, e87_ltft]
+             if t is not None]
     if trims:
         max_trim = max(abs(t) for t in trims)
         if max_trim < 5:
@@ -918,6 +950,12 @@ def evaluate_health(values):
         else:
             # Driving - just show value without health assessment
             health["maf"] = {"color": "blue", "text": "MAF", "value": f"{maf:.1f} kg/h"}
+    elif values.get("maf") is not None:
+        # E87 OBD PID 0x10 reports g/s, not kg/h, and this is a different
+        # (smaller, turbocharged) engine than the M52 thresholds above are
+        # tuned for — show it as informational only, no color verdict.
+        health["maf"] = {"color": "blue", "text": "MAF",
+                          "value": f"{values['maf']:.1f} g/s"}
 
     # VANOS: command-vs-response when S23 is logged, else position-only.
     # NOTE: single-VANOS cam RESTS at ~26.6° (raw 0x47) — "active" means the
