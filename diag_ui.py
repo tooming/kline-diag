@@ -169,6 +169,20 @@ class E39Adapter:
     proto = "e39"
     modules = ds2_diag.E39_MODULES
     vin = "WBAXXXXXXXXXXXXXX"  # placeholder until a real read is confirmed
+    # kW per g/s of MAF (P12, kg/h -> g/s) -- calibrated per detected engine
+    # (self.dme["engine"], e.g. "M52"), not VIN: DS2 has no confirmed VIN
+    # job (see read_vin()), so vin stays a placeholder forever on this
+    # protocol and can't distinguish cars the way the E87's real VIN can
+    # (see E87Adapter._POWER_CONSTANT_BY_VIN).
+    _POWER_CONSTANT_BY_ENGINE = {
+        # 1998 523i (M52B25, this repo's documented E39): factory rated
+        # 125 kW @ 5500 rpm (confirmed via web search, not memory). A real
+        # WOT pull's MAF right at ~5500-5600 rpm (152.78 g/s) calibrates
+        # this engine's estimate to its actual rating at that point,
+        # rather than guessing a generic constant.
+        "M52": 125.0 / 152.78,
+    }
+    _DEFAULT_POWER_CONSTANT = 0.98 * 0.7457
 
     def read_vin(self):
         """DS2 has no confirmed standard VIN job across this ECU set, so we
@@ -229,6 +243,16 @@ class E39Adapter:
             self.live_channels.append(
                 {"id": "vanos_state", "label": "VANOS State",
                  "group": "VANOS", "unit": "", "graph": False})
+        if any(p["id"] == "P12" for p in params) and any(p["id"] == "P8" for p in params):
+            # synthetic channels computed by live_sample() from P12 (MAF)
+            # + P8 (RPM), same estimate approach as the E87 -- see
+            # _POWER_CONSTANT_BY_ENGINE.
+            self.live_channels.append(
+                {"id": "power_kw", "label": "Est. Crank Power", "unit": "kW",
+                 "group": "Engine", "graph": True})
+            self.live_channels.append(
+                {"id": "torque_nm", "label": "Est. Crank Torque", "unit": "Nm",
+                 "group": "Engine", "graph": True})
         self.logger = ds2_diag.MS41Logger(self.ds2, params)
         self.profile_stats = {
             "total": len(params),
@@ -337,7 +361,22 @@ class E39Adapter:
                 "after": self.faults(addr)}
 
     def live_sample(self):
-        return self.logger.sample() or {}
+        s = self.logger.sample() or {}
+        maf_kgh = s.get("P12")
+        if maf_kgh is not None:
+            # MAF-based dyno estimate, same approach as the E87 -- see
+            # _POWER_CONSTANT_BY_ENGINE for the calibration/uncertainty
+            # notes (only the recognized-engine case should be read as
+            # tracking real-world kW closely).
+            maf_gps = maf_kgh * 1000 / 3600
+            k = self._POWER_CONSTANT_BY_ENGINE.get(
+                self.dme.get("engine"), self._DEFAULT_POWER_CONSTANT)
+            s["power_kw"] = round(maf_gps * k, 1)
+            rpm = s.get("P8") or 0
+            if rpm > 50:
+                omega = rpm * 2 * math.pi / 60
+                s["torque_nm"] = round(s["power_kw"] * 1000 / omega, 1)
+        return s
 
 
 class DemoAdapter(E39Adapter):
@@ -556,6 +595,23 @@ class E87Adapter:
         "engine_load": 0x04, "throttle": 0x11, "iat_c": 0x0F, "maf": 0x10,
         "timing_advance": 0x0E, "stft": 0x06, "ltft": 0x07,
     }
+    # kW per g/s of MAF -- calibrated per specific car, keyed by VIN, where
+    # a real WOT pull's peak MAF plus the engine's known factory rating
+    # give an actual reference point; _DEFAULT_POWER_CONSTANT (the generic
+    # rule-of-thumb, see live_sample()) otherwise. This class is shared by
+    # every E87 regardless of engine (N45 vs N52...), so this must not be
+    # a single global constant -- calibrating against one car's data would
+    # silently throw off every other car's estimate.
+    _POWER_CONSTANT_BY_VIN = {
+        # 2005 116i (N45B16, this repo's primary documented car): factory
+        # rated 85 kW @ 6000 rpm (confirmed via web search, not memory --
+        # see BMW N45B16 spec sheets). A real WOT pull's peak MAF
+        # (88.25 g/s) landed almost exactly at 6000 rpm, so 85/88.25
+        # calibrates this car's estimate to its actual rating at that
+        # point instead of the generic guess.
+        "WBAXXXXXXXXXXXXXX": 85.0 / 88.25,
+    }
+    _DEFAULT_POWER_CONSTANT = 0.98 * 0.7457
 
     def __init__(self):
         self.kl = KLine(rawlog_path=os.path.join(DATA, "kline_raw.log"))
@@ -713,11 +769,15 @@ class E87Adapter:
             if d:
                 s[chan_id] = round(obd2.decode_pid(pid, d), 2)
         if "maf" in s:
-            # Rough MAF-based dyno estimate, not a calibrated measurement:
-            # HP ~= MAF(g/s) x 0.98 (rule-of-thumb VE-based conversion),
-            # kW = HP x 0.7457. Good enough to compare before/after a repair
-            # on the same car, not for absolute accuracy.
-            s["power_kw"] = round(s["maf"] * 0.98 * 0.7457, 1)
+            # MAF-based dyno estimate. Calibrated against this specific
+            # car's known factory rating when recognized by VIN (see
+            # _POWER_CONSTANT_BY_VIN); otherwise a rough, uncalibrated
+            # rule-of-thumb. Good enough to compare before/after a repair
+            # on the same car either way, but only the calibrated case
+            # should be read as tracking real-world kW at all closely.
+            k = self._POWER_CONSTANT_BY_VIN.get(
+                self.vin, self._DEFAULT_POWER_CONSTANT)
+            s["power_kw"] = round(s["maf"] * k, 1)
             # Torque follows directly from power_kw + rpm (P = T * omega) --
             # no separate calibration, just physics -- so it carries exactly
             # the same uncertainty as power_kw above, no more/less. Only
