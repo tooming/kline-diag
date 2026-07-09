@@ -54,10 +54,39 @@ def test_validate_catches_bad_profile():
     print("test_validate_catches_bad_profile OK")
 
 
+def test_safe_eval_expr_real_formulas():
+    # Real expr strings pulled from ms41_ram_params.json / ms43_ram_params.json.
+    assert ds2_diag.safe_eval_expr("x*0.747-48", 100) == 100 * 0.747 - 48
+    assert ds2_diag.safe_eval_expr("(x-32768)*100/65535", 40000) == \
+        (40000 - 32768) * 100 / 65535
+    assert ds2_diag.safe_eval_expr("x*1.526E-3", 200) == 200 * 1.526e-3
+    assert ds2_diag.safe_eval_expr("-0.375*x+72", 10) == -0.375 * 10 + 72
+    assert ds2_diag.safe_eval_expr("x", 42) == 42
+    print("test_safe_eval_expr_real_formulas OK")
+
+
+def test_safe_eval_expr_rejects_unsafe():
+    # RomRaider leftovers (BitWise/if calls, HTML entities) and any attempt
+    # at code execution must be rejected, not silently run.
+    for expr in ("BitWise(1023, x, 1)*0.00488",
+                 "if(BitWise(896,x,1)&gt;0,1,0)",
+                 "__import__('os').system('echo pwned')",
+                 "().__class__"):
+        try:
+            ds2_diag.safe_eval_expr(expr, 1)
+            raised = False
+        except Exception:
+            raised = True
+        assert raised, f"expected {expr!r} to be rejected"
+    print("test_safe_eval_expr_rejects_unsafe OK")
+
+
 if __name__ == "__main__":
     test_ram_diff_ranks_by_magnitude()
     test_ram_diff_threshold()
     test_profiles_valid()
     test_profile_lookup()
     test_validate_catches_bad_profile()
+    test_safe_eval_expr_real_formulas()
+    test_safe_eval_expr_rejects_unsafe()
     print("\nAll RAM/vehicle tests passed.")

@@ -17,6 +17,8 @@ Reuses the KLine transport from power_diag.py (raw termios; pyserial does
 not work with this adapter on macOS). All traffic logs to kline_raw.log.
 """
 import argparse
+import ast
+import operator
 import os
 import sys
 import time
@@ -212,6 +214,42 @@ def body(frame):
     return frame[3:-1]
 
 
+_SAFE_BINOPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+}
+_SAFE_UNARYOPS = {
+    ast.UAdd: operator.pos,
+    ast.USub: operator.neg,
+}
+
+
+def safe_eval_expr(expr, x):
+    """Evaluate a simple arithmetic conversion formula like "x*0.747-48".
+
+    Only numeric literals, the variable `x`, +-*/ and unary +/- are
+    allowed (RAM-param expr strings are linear/affine formulas). Anything
+    else raises ValueError instead of running arbitrary code, unlike a
+    bare eval() of an untrusted-formatted string.
+    """
+    def _eval(node):
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.Name) and node.id == "x":
+            return x
+        if isinstance(node, ast.BinOp) and type(node.op) in _SAFE_BINOPS:
+            return _SAFE_BINOPS[type(node.op)](_eval(node.left), _eval(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _SAFE_UNARYOPS:
+            return _SAFE_UNARYOPS[type(node.op)](_eval(node.operand))
+        raise ValueError(f"disallowed expression node: {ast.dump(node)}")
+
+    return _eval(ast.parse(expr, mode="eval"))
+
+
 class MS41Logger:
     """Fast multi-parameter logging from the MS41 DME via the DS2
     address-list mechanism (verified against RomRaider's DS2 support):
@@ -264,8 +302,7 @@ class MS41Logger:
                 v -= 65536
             i += n
             try:
-                out[p["id"]] = round(eval(p["expr"], {"__builtins__": {}},
-                                          {"x": v}), 2)
+                out[p["id"]] = round(safe_eval_expr(p["expr"], v), 2)
             except Exception:
                 out[p["id"]] = v
         return out
