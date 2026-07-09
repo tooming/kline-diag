@@ -1336,7 +1336,22 @@ class Handler(BaseHTTPRequestHandler):
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
         urn = (q.get("urn") or [""])[0].strip()
         if urn:
-            return ovpf_producer.passport_state_by_urn(urn)
+            st = ovpf_producer.passport_state_by_urn(urn)
+            if not st.get("passport"):
+                # Nothing local -- e.g. a passport.skoor.ee URL pasted/
+                # scanned for a car diagnosed on a different device, or a
+                # cloud-only passport this one's never synced. Try pulling
+                # it from the cloud before reporting "no passport" (see
+                # ovpf_cloud.pull_passport) -- best-effort: offline or an
+                # id the provider doesn't have just falls back to the
+                # original empty state, same as before this existed.
+                try:
+                    import ovpf_cloud
+                    ovpf_cloud.pull_passport(ovpf_cloud._bare_id(urn))
+                    st = ovpf_producer.passport_state_by_urn(urn)
+                except Exception:
+                    pass
+            return st
         vin = (q.get("vin") or [""])[0].strip()
         return ovpf_producer.passport_state(vin or _current_vin())
 

@@ -134,18 +134,22 @@ def best_auth_session(producer_domain=None):
 
 # --- HTTP -------------------------------------------------------------------
 
+# Cloudflare's bot protection in front of the provider 403s/1010s urllib's
+# default "Python-urllib/x.y" User-Agent -- needs to look like a real
+# browser request to get through at all. Shared by _request() and
+# pull_passport() (the latter can't reuse _request() itself -- /export
+# returns raw NDJSON, not a single JSON body).
+_USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+               "AppleWebKit/537.36 (KHTML, like Gecko) "
+               "Chrome/120.0 Safari/537.36")
+
+
 def _request(method, path, body=None, token=None, timeout=10.0):
     url = PROVIDER_URL.rstrip("/") + path
     data = json.dumps(body).encode("utf-8") if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
     req.add_header("content-type", "application/json")
-    # Cloudflare's bot protection in front of the provider 403s/1010s
-    # urllib's default "Python-urllib/x.y" User-Agent -- needs to look
-    # like a real browser request to get through at all.
-    req.add_header("User-Agent",
-                   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) "
-                   "Chrome/120.0 Safari/537.36")
+    req.add_header("User-Agent", _USER_AGENT)
     if token:
         req.add_header("authorization", f"Bearer {token}")
     try:
@@ -209,6 +213,45 @@ def _bare_id(vehicle_urn):
     """`urn:ovpf:<uuid>` -> `<uuid>` -- the provider's id format."""
     prefix = "urn:ovpf:"
     return vehicle_urn[len(prefix):] if vehicle_urn.startswith(prefix) else vehicle_urn
+
+
+def pull_passport(passport_id):
+    """Fetch a passport's full event history from the cloud provider and
+    cache it locally as a new .ovpf.ndjson, keyed by the provider's own
+    uuid rather than a VIN -- this device may have no VIN on file for a
+    passport it's never seen before (e.g. one opened here by pasting/
+    scanning a passport.skoor.ee URL for a car diagnosed on a different
+    device). This is what makes diag_ui.py's ?urn=/?vin= passport lookup
+    (see _qs_passport_state) work for a passport that only exists in the
+    cloud so far -- without this it 404s locally even though the id is
+    real, which is confusing since the exact same URL works fine in a
+    browser (the web viewer always reads from the cloud).
+
+    No-op if already cached locally -- doesn't clobber local data (which
+    may have edits not yet pushed) with a possibly-stale cloud copy.
+    Raises CloudError if the provider has nothing for this id."""
+    path = os.path.join(ovpf_producer._passports_dir(),
+                        f"{passport_id}.ovpf.ndjson")
+    if os.path.exists(path):
+        return path
+    url = PROVIDER_URL.rstrip("/") + f"/v1/passports/{passport_id}/export"
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", _USER_AGENT)
+    try:
+        with urllib.request.urlopen(req, timeout=10.0,
+                                    context=_SSL_CONTEXT) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise CloudError("no such passport on this provider")
+        raise CloudError(f"HTTP {e.code}")
+    except urllib.error.URLError as e:
+        raise CloudError(f"provider unreachable: {e.reason}")
+    if not raw.strip():
+        raise CloudError("passport has no events yet")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(raw if raw.endswith("\n") else raw + "\n")
+    return path
 
 
 def _synced_path(log_path):
