@@ -1125,13 +1125,23 @@ def detect_pull(values):
         # Check for pull end (hysteresis)
         if throttle < 60 or load < 50:
             PULL_STATE["active"] = False
+            t_start = PULL_STATE.get("t_start")
+            t_end = time.time()
+            peaks = dict(PULL_STATE.get("peaks", {}))
             PULLS_LOG.append({
                 "num": PULL_STATE["counter"],
-                "t_start": PULL_STATE.get("t_start"),
-                "t_end": time.time(),
-                "peaks": dict(PULL_STATE.get("peaks", {})),
+                "t_start": t_start,
+                "t_end": t_end,
+                "peaks": peaks,
             })
             del PULLS_LOG[:-50]  # cap; a session isn't going to need more
+            try:    # append an OVPF DynoRun event for this pull's peaks
+                ovpf_producer.record_dyno_run(
+                    _current_vin(), peaks,
+                    duration_s=(t_end - t_start) if t_start else None,
+                    num=PULL_STATE["counter"])
+            except Exception:
+                pass
             return ("end", PULL_STATE["counter"])
 
     return None

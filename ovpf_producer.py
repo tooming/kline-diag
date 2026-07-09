@@ -277,6 +277,37 @@ def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
         urn, "LiveDataRecorded", data, _producer(PRODUCER)))
 
 
+def record_dyno_run(vin, peaks, duration_s=None, num=None):
+    """Append a `DynoRun` -- peak power/torque from a detected WOT pull
+    (see diag_ui.py's detect_pull()/PULLS_LOG), producer type Diagnostic
+    since these numbers came straight off the ECU's live channels, not a
+    person's claim. `peaks` is whatever numeric channels were tracked
+    during the pull (channel id -> running max); power_kw/torque_nm map to
+    the spec's power/torque fields when present (only true for the E87's
+    MAF-based estimate today -- other adapters/cars won't have them), and
+    everything else (rpm, maf, speed_kmh, ...) goes under `conditions` for
+    context, same "essentials, not exhaustive" latitude the spec gives
+    every other field here."""
+    if not peaks:
+        return None
+    path, urn = ensure_passport(vin)
+    data = {}
+    if "power_kw" in peaks:
+        data["power"] = {"value": peaks["power_kw"], "unit": "kW"}
+    if "torque_nm" in peaks:
+        data["torque"] = {"value": peaks["torque_nm"], "unit": "Nm"}
+    conditions = {k: v for k, v in peaks.items()
+                  if k not in ("power_kw", "torque_nm")}
+    if conditions:
+        data["conditions"] = conditions
+    if duration_s is not None:
+        data["duration"] = {"value": round(duration_s, 1), "unit": "s"}
+    if num is not None:
+        data["pullNumber"] = num
+    return ovpf_core.append(path, ovpf_core.envelope(
+        urn, "DynoRun", data, _producer(PRODUCER)))
+
+
 def passport_state(vin):
     """Derived state for the current passport (for the UI timeline)."""
     path = _log_path(vin)
