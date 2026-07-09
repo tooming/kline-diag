@@ -257,6 +257,9 @@ class E39Adapter:
             self.name = (f"E39 {dme['engine']}/{dme['dme']} (DS2 9600 8E1)")
             self._load_dme_params(dme)
             self._build_profile(self.current_profile)
+        v = self.read_vin()
+        if v:
+            self.vin = v      # promote placeholder -> confirmed real VIN
         return True
 
     def engine_info(self):
@@ -505,7 +508,13 @@ class E87Adapter:
     """KWP2000 (2005 E87)."""
     name = "E87 (KWP2000 10400 8N1)"
     proto = "e87"
-    vin = "WBAXXXXXXXXXXXXXX"  # TODO: Read from module
+    vin = "WBAXXXXXXXXXXXXXX"  # placeholder — promoted to the real VIN by
+                                # detect()/read_vin() once confirmed (same
+                                # contract as E39Adapter), becoming the
+                                # backup/passport key from then on
+    vin_suffix = None          # last 7 chars of the real VIN (display-only
+                                # fallback for when the full read fails —
+                                # see read_vin_suffix())
     modules = {a: n for a, n in power_diag.MODULES.items()
                if a in (0x00, 0x01, 0x12, 0x29, 0x40, 0x60, 0x63, 0x64,
                         0x72, 0x78)}
@@ -553,18 +562,53 @@ class E87Adapter:
     def detect(self):
         r = self.kl.fast_init(0x12)
         if r:
-            v = self.read_vin()          # while the session is live
+            self.vin_suffix = self.read_vin_suffix()  # display-only partial
+            v = self.read_vin()          # full VIN, if confirmed
             if v:
-                self.vin = v
+                self.vin = v      # promote placeholder -> confirmed real VIN
             self.kl.stop_comm(0x12)
             return True
         return False
 
     def read_vin(self):
-        """VIN via KWP readECUIdentification (service 1A, identifier 90).
+        """KWP readECUIdentification, service 1A identifier 0x86 -- the
+        full VIN. Same contract as E39Adapter.read_vin(): a truthy return
+        here is promoted to self.vin (the backup/passport key) by detect().
 
-        Read-only and best-effort: returns None if the DME doesn't answer,
-        so the caller keeps the placeholder. Not yet hardware-verified.
+        Hardware-verified on this car: the DME answers with a 38-char
+        combined production record, structured as
+        [serial:7][unknown:9][unknown:12][VIN-prefix:10] -- reassembling
+        as prefix+serial gives exactly the real 17-char VIN (confirmed
+        against the physical VIN plate). The two middle fields are still
+        unidentified; this only trusts the parse when the total length
+        matches what was verified, so an unexpected DME/format returns
+        None rather than a wrong guess.
+        """
+        try:
+            frames = self.kl.request(b"\x1A\x86", 0x12, timeout=1.0)
+            for f in frames:
+                p = power_diag.frame_payload(f)
+                if p[:2] == b"\x5A\x86":     # positive response to 1A 86
+                    raw = bytes(p[2:]).decode("ascii", "ignore")
+                    clean = "".join(ch for ch in raw if ch.isalnum())
+                    if len(clean) == 38:
+                        vin = clean[28:38] + clean[0:7]
+                        if len(vin) == 17:
+                            return vin
+        except Exception:
+            pass
+        return None
+
+    def read_vin_suffix(self):
+        """KWP readECUIdentification, service 1A identifier 0x90.
+
+        Hardware-verified on this car: the DME answers with 7 ASCII
+        characters that are exactly the last 7 characters of the real VIN
+        (confirmed against the physical VIN plate) -- this is BMW's
+        "production serial" identifier, not the full 17-character VIN.
+        Display-only fallback for when read_vin() (the full VIN, service
+        1A 86) doesn't resolve -- never promoted to self.vin, a 7-char
+        value isn't a safe backup key on its own.
         """
         try:
             frames = self.kl.request(b"\x1A\x90", 0x12, timeout=1.0)
@@ -573,7 +617,7 @@ class E87Adapter:
                 if p[:2] == b"\x5A\x90":     # positive response to 1A 90
                     raw = bytes(p[2:]).decode("ascii", "ignore")
                     vin = "".join(ch for ch in raw if ch.isalnum())
-                    if 11 <= len(vin) <= 17:
+                    if 5 <= len(vin) <= 17:
                         return vin
         except Exception:
             pass
@@ -777,6 +821,7 @@ CALIBRATION = {"active": False, "gear": None, "samples": [],
 # Default E39 523i manual transmission gear ratios (RPM/km/h) as initial guesses.
 # These will be overridden by calibrated values from gear_ratios.json if present.
 DEFAULT_GEAR_RATIOS = {
+    1: 110.0,  # 1st gear (rough placeholder — calibrate to replace)
     2: 75.0,   # 2nd gear
     3: 50.0,   # 3rd gear
     4: 37.5,   # 4th gear
@@ -1237,6 +1282,10 @@ class Handler(BaseHTTPRequestHandler):
             # Gather vehicle info from adapter and modules
             vehicle_info = {
                 "vin": ADAPTER.vin,
+                # generic across adapters: vin has been promoted from the
+                # placeholder once any adapter's read_vin() confirms a
+                # real one (see E39Adapter/E87Adapter.detect())
+                "vin_confirmed": ADAPTER.vin != "WBAXXXXXXXXXXXXXX",
                 "protocol": ADAPTER.proto,
                 "adapter_name": ADAPTER.name
             }
@@ -1274,6 +1323,12 @@ class Handler(BaseHTTPRequestHandler):
             elif ADAPTER.proto == "e87":
                 vehicle_info["model"] = "E87"
                 vehicle_info["year"] = 2005  # From VIN
+                # vin above is now the confirmed real VIN once detect() has
+                # run (see E87Adapter.read_vin); vin_suffix is a
+                # display-only fallback for when only the partial read
+                # succeeded.
+                vehicle_info["vin_suffix"] = getattr(ADAPTER, "vin_suffix",
+                                                     None)
 
             # Add transmission type (default unknown, can be enhanced)
             vehicle_info["transmission"] = "Unknown"
@@ -2062,10 +2117,15 @@ class Handler(BaseHTTPRequestHandler):
                     # Get current sample from live data
                     if LIVE_LAST.get("ok") and LIVE_LAST.get("values"):
                         v = LIVE_LAST["values"]
-                        rpm = v.get("P8")
-                        speed = v.get("P9")
-                        throttle = v.get("P13", 0)
-                        if rpm and speed:
+                        # E39 (DS2 RAM param ids) or E87 (plain OBD PID names)
+                        rpm = v.get("P8") or v.get("rpm")
+                        speed = v.get("P9") or v.get("speed_kmh")
+                        throttle = v.get("P13") or v.get("throttle") or 0
+                        # speed can legitimately be 0 (stationary) — that's
+                        # still real data, `is_stable_for_calibration` below
+                        # reports "speed too low" for it, don't misreport it
+                        # as missing data
+                        if rpm is not None and speed is not None:
                             # Check stability
                             stable, reason = is_stable_for_calibration(
                                 rpm, speed, throttle,

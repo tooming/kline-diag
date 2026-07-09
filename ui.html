@@ -576,7 +576,7 @@
       <p>20-30 samples will be collected per gear.</p>
     </div>
     <div class="modal-buttons" id="calbuttons">
-      <button onclick="startCalibration(2)">Start with 2nd gear</button>
+      <button onclick="startCalibration(1)">Start with 1st gear</button>
       <button onclick="closeCalModal()">Cancel</button>
     </div>
   </div>
@@ -620,12 +620,15 @@ function setState(s) {
   // so the tab shouldn't be gated behind one either.
   $("devsec").style.display = s.connected ? "" : "none";  // Show developer mode when connected
 
-  // show profile selector only for E39
+  // Gear calibration only needs live rpm+speed, which both E39 and E87
+  // provide — show it for any connected car, not just E39.
+  $("calibratebtn").style.display = s.connected ? "" : "none";
+
+  // show profile selector only for E39 (multiple logging profiles)
   const profileSel = $("profilesel");
   const profStats = $("profstats");
   if (s.protocol === "e39" && s.profiles && s.profiles.length) {
     profileSel.style.display = "";
-    $("calibratebtn").style.display = "";  // show calibrate button for E39
     if (s.profile) profileSel.value = s.profile;
     // show profile stats
     if (s.profile_stats) {
@@ -738,7 +741,11 @@ async function loadDashboard() {
     const v = await api("/api/vehicle");
     if (!v.error) {
       $("vehiclemodel").textContent = v.model || "Unknown";
-      $("vehiclevin").textContent = v.vin || "Unknown";
+      $("vehiclevin").textContent = v.vin_confirmed
+        ? `${v.vin} (confirmed)`
+        : v.vin_suffix
+        ? `...${v.vin_suffix} (confirmed serial; full VIN not read)`
+        : (v.vin || "Unknown");
       $("vehicleyear").textContent = v.year || "Unknown";
       $("vehicleengine").textContent = v.engine || "Unknown";
       $("vehicleprotocol").textContent = v.protocol || "Unknown";
@@ -2683,6 +2690,13 @@ async function pollLog() {
 // ---- gear calibration ----
 let calInterval = null;
 
+function ordinal(n) {
+  if (n % 10 === 1 && n % 100 !== 11) return `${n}st`;
+  if (n % 10 === 2 && n % 100 !== 12) return `${n}nd`;
+  if (n % 10 === 3 && n % 100 !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
 $("calibratebtn").onclick = () => {
   $("calmodal").style.display = "flex";
 };
@@ -2702,7 +2716,7 @@ async function startCalibration(gear) {
 
   $("caltitle").textContent = `Calibrating Gear ${gear}`;
   $("calbody").innerHTML = `
-    <p>Drive steadily in <strong>${gear}${gear===2?"nd":gear===3?"rd":"th"} gear</strong> at <strong>2500-3000 RPM</strong>.</p>
+    <p>Drive steadily in <strong>${ordinal(gear)} gear</strong> at <strong>2500-3000 RPM</strong>.</p>
     <p>Samples captured: <span id="calsamples">0</span> / 25</p>
     <p>Current ratio: <span id="calratio">—</span></p>
     <p id="calstatus" class="muted" style="font-size:12px">⚪ Waiting for stable conditions...</p>
