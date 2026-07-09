@@ -32,7 +32,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller pywebview pyserial segno
+          pip install pyinstaller pywebview pyserial segno certifi
 
       - name: Build frozen app
         run: pyinstaller --noconfirm opendiag.spec

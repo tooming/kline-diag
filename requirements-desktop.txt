@@ -4,3 +4,5 @@
 # automatically). No Chromium is bundled.
 pywebview>=5.0
 segno>=1.6   # offline QR generation for the passport
+certifi      # CA bundle for ovpf_cloud.py's HTTPS calls -- a frozen build
+             # has no OS certificate store to fall back on (see opendiag.spec)

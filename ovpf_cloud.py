@@ -25,6 +25,7 @@ talking to the provider, see _bare_id().
 """
 import json
 import os
+import ssl
 import urllib.error
 import urllib.request
 
@@ -33,6 +34,31 @@ import ovpf_producer
 import paths
 
 PROVIDER_URL = os.environ.get("OVP_PROVIDER_URL", "https://passport.skoor.ee")
+
+
+def _ssl_context():
+    """A frozen (PyInstaller) build has no access to the OS certificate
+    store the way a source-run interpreter does -- urlopen() then fails
+    every HTTPS request with CERTIFICATE_VERIFY_FAILED.
+
+    Prefer the CA bundle opendiag.spec copies in as a plain resource file
+    (read back via paths.resource_dir(), same mechanism as ui.html) over
+    calling certifi.where() directly: a pure-Python package's own
+    __file__-relative path resolution isn't reliable once PyInstaller has
+    packed it into its zipped archive. Falls back to an installed
+    certifi, then the platform default (source runs, where it already
+    works without any of this)."""
+    bundled = os.path.join(paths.resource_dir(), "cacert.pem")
+    if os.path.exists(bundled):
+        return ssl.create_default_context(cafile=bundled)
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return None
+
+
+_SSL_CONTEXT = _ssl_context()
 
 
 class CloudError(Exception):
@@ -123,7 +149,8 @@ def _request(method, path, body=None, token=None, timeout=10.0):
     if token:
         req.add_header("authorization", f"Bearer {token}")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout,
+                                    context=_SSL_CONTEXT) as resp:
             raw = resp.read()
             return resp.status, (json.loads(raw) if raw else {})
     except urllib.error.HTTPError as e:

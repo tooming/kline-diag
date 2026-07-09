@@ -10,6 +10,8 @@ backups) goes to a per-user folder via paths.data_dir().
 """
 import sys
 
+import certifi
+
 # Read-only resources the running app loads by name from resource_dir().
 datas = [(f, '.') for f in (
     'ui.html',
@@ -22,6 +24,15 @@ datas = [(f, '.') for f in (
     'operations.json',
     'reference_ms43_ds2_commands.ts',
 )]
+# A frozen build has no OS certificate store to fall back on, so every
+# HTTPS call in ovpf_cloud.py would fail with CERTIFICATE_VERIFY_FAILED
+# without one. Bundling certifi's cacert.pem as a plain resource file
+# (read back via paths.resource_dir(), same mechanism as ui.html) rather
+# than importing certifi at runtime -- a pure-Python package's own
+# __file__-relative path resolution (which is how certifi.where() finds
+# its own data file) isn't reliable once PyInstaller has packed it into
+# its zipped archive.
+datas += [(certifi.where(), '.')]
 
 # diag_ui pulls most of these in via endpoint-level imports; list them so
 # PyInstaller's static analysis can't miss any.
@@ -31,7 +42,8 @@ hiddenimports = [
     'actuators', 'compare', 'correlate', 'plugins', 'vehicle_profiles',
     'trace', 'dev_console', 'paths',
 ]
-hiddenimports += ['ovpf_core', 'ovpf_producer', 'segno']
+hiddenimports += ['ovpf_core', 'ovpf_producer', 'ovpf_cloud', 'segno',
+                  'certifi']
 if sys.platform.startswith('win'):
     hiddenimports += ['serial', 'serial.tools.list_ports']
 
