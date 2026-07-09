@@ -34,9 +34,19 @@ BASE = f"http://127.0.0.1:{PORT}"
 
 
 def _server_up():
-    """True if something answers /api/state on PORT."""
+    """True if something answers /api/state on PORT.
+
+    Every /api/ route (see diag_ui.py's _csrf_ok) requires the
+    X-OpenDiag-Client header to force a CORS preflight against
+    cross-origin pages -- without it this always got 403, so this check
+    never once saw the server as up, and start_server() always gave up
+    after ~10s and raised SystemExit before webview.create_window() ever
+    ran. Same header ui.html's own api() helper sends on every call.
+    """
+    req = urllib.request.Request(f"{BASE}/api/state",
+                                  headers={"X-OpenDiag-Client": "1"})
     try:
-        with urllib.request.urlopen(f"{BASE}/api/state", timeout=0.5) as r:
+        with urllib.request.urlopen(req, timeout=0.5) as r:
             return r.status == 200
     except Exception:
         return False
