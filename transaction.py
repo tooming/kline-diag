@@ -34,8 +34,22 @@ Usage:
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
+
+
+def _safe_component(s):
+    """Sanitize a path component (vin, operation_id) before it's joined
+    into a filesystem path -- both ultimately originate from HTTP request
+    data (diag_ui.py's /api/backup/<operation_id> and connected-adapter
+    VIN), and an unsanitized ".." segment there is a path-traversal
+    primitive out of backup_root. Stripping "/" alone isn't enough: a bare
+    ".." has no slash in it and still means "parent dir" to the
+    filesystem, so it needs its own check after the allow-list filter
+    (same allow-list ovpf_producer._log_path uses for VINs)."""
+    s = re.sub(r"[^A-Za-z0-9._-]", "_", s or "")
+    return s if s not in ("", ".", "..") else "_"
 
 
 class TransactionError(Exception):
@@ -227,10 +241,10 @@ class TransactionManager:
             Path to backup directory
         """
         # Create VIN-specific backup directory
-        vin_dir = self.backup_root / vin
+        vin_dir = self.backup_root / _safe_component(vin)
         vin_dir.mkdir(exist_ok=True)
 
-        backup_dir = vin_dir / operation_id
+        backup_dir = vin_dir / _safe_component(operation_id)
         backup_dir.mkdir(exist_ok=True)
 
         # Sanitize module name for filename (replace path separators)
@@ -300,7 +314,7 @@ class TransactionManager:
         Returns:
             List of dicts with backup metadata
         """
-        vin_dir = self.backup_root / vin
+        vin_dir = self.backup_root / _safe_component(vin)
         if not vin_dir.exists():
             return []
 
@@ -339,7 +353,7 @@ class TransactionManager:
         Returns:
             dict with metadata and data, or None if not found
         """
-        backup_dir = self.backup_root / vin / operation_id
+        backup_dir = self.backup_root / _safe_component(vin) / _safe_component(operation_id)
         if not backup_dir.exists():
             return None
 

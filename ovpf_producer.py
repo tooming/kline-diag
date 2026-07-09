@@ -100,6 +100,43 @@ def clear_workshop():
         pass
 
 
+# --- vehicle nickname (local-only, not an OVPF event) -----------------------
+# A personal label ("The E39", "Mom's daily") for the garage/passport UI --
+# distinct from VehicleIdentified facts (VIN/make/model/year), which are
+# immutable, hash-chained, and get pushed to cloud sync. A nickname is
+# neither a diagnostic fact nor something to broadcast on a shared vehicle
+# passport, so it's kept in its own local file (like workshop.json),
+# editable/overwritable at will, and never touched by ovpf_cloud.
+
+def _vehicle_names_path():
+    return os.path.join(paths.data_dir(), "vehicle_names.json")
+
+
+def _load_vehicle_names():
+    try:
+        with open(_vehicle_names_path(), encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def get_vehicle_name(urn):
+    return _load_vehicle_names().get(urn) if urn else None
+
+
+def set_vehicle_name(urn, name):
+    """Set (or, if name is blank, clear) the nickname for a passport urn."""
+    names = _load_vehicle_names()
+    name = (name or "").strip()
+    if name:
+        names[urn] = name
+    else:
+        names.pop(urn, None)
+    with open(_vehicle_names_path(), "w", encoding="utf-8") as f:
+        json.dump(names, f)
+    return names.get(urn)
+
+
 def _producer(base):
     """Attribute an event to the active workshop profile instead of
     `base` (PRODUCER/MANUAL), keeping base's other metadata (version,
@@ -247,6 +284,7 @@ def passport_state(vin):
     state = ovpf_core.reduce(events)
     state["chain_ok"] = not ovpf_core.verify_chain(events)
     state["passport_urn"] = state.get("passport")
+    state["name"] = get_vehicle_name(state["passport_urn"])
     return state
 
 
@@ -266,6 +304,7 @@ def list_passports():
         state = ovpf_core.reduce(events)
         state["chain_ok"] = not ovpf_core.verify_chain(events)
         state["passport_urn"] = state.get("passport")
+        state["name"] = get_vehicle_name(state["passport_urn"])
         out.append(state)
     return out
 

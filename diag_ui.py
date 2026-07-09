@@ -1187,9 +1187,36 @@ def snapshot_faults(addr, faults):
             "faults": faults}) + "\n")
 
 
+# The server binds to 127.0.0.1 only, but that alone doesn't stop a
+# malicious page open in the user's *browser* from reaching it: simple
+# cross-origin requests (fetch with Content-Type: text/plain, or a plain
+# <form> POST) skip CORS preflight entirely, and _body() parses the JSON
+# payload regardless of declared content-type. Without this check, any
+# website the user has open while the diag server is running could POST to
+# /api/clear, /api/coding/write, /api/actuator/test (physical actuation),
+# /api/coding/restore etc. with zero auth. ui.html's api() helper always
+# sends this header; a custom header forces a CORS preflight, and this
+# server never answers one with permissive CORS headers, so a real browser
+# blocks the actual cross-origin request before it's sent. This is not a
+# secret (the header name/value is visible in ui.html's source, downloadable
+# by anyone) -- it works because it relies on *browser* CORS enforcement,
+# not on the value being hidden. It does nothing to stop a local process
+# that can already run arbitrary code on this machine -- that's a
+# different, larger threat model than "a webpage tricked the browser".
+_CLIENT_HEADER = "X-OpenDiag-Client"
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
+
+    def _csrf_ok(self):
+        # /api/passport/qr is loaded via a plain <img src>, which can never
+        # carry a custom header -- exempt it; it's read-only and not
+        # sensitive (a QR code encoding a public passport URL).
+        if not self.path.startswith("/api/") or self.path.startswith("/api/passport/qr"):
+            return True
+        return self.headers.get(_CLIENT_HEADER) == "1"
 
     def _json(self, obj, code=200):
         data = json.dumps(obj).encode()
@@ -1201,6 +1228,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
+        # Sanity cap -- nothing legitimate here (coding writes, service
+        # notes) is anywhere near this size; an unbounded read lets any
+        # caller that reaches this port hand it an arbitrarily large
+        # Content-Length and inflate memory.
+        if n > 10_000_000:
+            raise ValueError("request body too large")
         return json.loads(self.rfile.read(n) or b"{}")
 
     def _raw(self, body, content_type, code=200):
@@ -1213,6 +1246,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        if not self._csrf_ok():
+            return self._json({"error": "forbidden"}, 403)
         if self.path.startswith("/api/passport/qr"):
             # Offline QR for the current passport (segno; graceful if absent).
             st = ovpf_producer.passport_state(_current_vin())
@@ -1637,6 +1672,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._csrf_ok():
+            return self._json({"error": "forbidden"}, 403)
         try:
             if self.path == "/api/connect":
                 proto = self._body().get("protocol", "auto")
@@ -2237,7 +2274,7 @@ class Handler(BaseHTTPRequestHandler):
                 b = self._body()
                 try:
                     self._json(_snap.diff_snapshots(b["a"], b["b"]))
-                except (KeyError, OSError) as e:
+                except (KeyError, OSError, ValueError) as e:
                     self._json({"error": str(e)}, 400)
             elif self.path == "/api/ram/read":
                 # Read-only RAM explorer (Phase 7.1). E39/MS41 only.
@@ -2378,6 +2415,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "at least one vehicle fact required"}, 400)
                 ev = ovpf_producer.record_vehicle_identified(_current_vin(), facts)
                 self._json(ev or {"note": "unchanged -- same facts already recorded"})
+            elif self.path == "/api/vehicle/name":
+                # Local-only nickname (see ovpf_producer.set_vehicle_name) --
+                # not an OVPF event, keyed by passport urn since a vehicle
+                # may not have a VIN yet. Blank name clears it.
+                b = self._body()
+                urn = (b.get("urn") or "").strip()
+                if not urn:
+                    return self._json({"error": "urn required"}, 400)
+                self._json({"name": ovpf_producer.set_vehicle_name(urn, b.get("name"))})
             elif self.path == "/api/workshop/set":
                 # Self-asserted local workshop identity -- no DNS/OTP, see
                 # ovpf_producer.get_workshop. Once set, every event logged

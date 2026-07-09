@@ -2,6 +2,7 @@
 """Test transaction layer independently."""
 import sys
 import os
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -57,5 +58,22 @@ def test_basic_transaction():
         print(f"  Metadata: {backup_data['metadata']}")
         print(f"  Data: {backup_data['data']}")
 
+def test_get_backup_rejects_path_traversal():
+    """operation_id (and vin) can come straight from an HTTP request
+    (diag_ui.py's /api/backup/<operation_id>) -- an unsanitized ".." there
+    used to let a caller read a metadata.json from outside backup_root."""
+    tmp = tempfile.mkdtemp()
+    tm = TransactionManager(backup_root=tmp)
+
+    outside = tempfile.mkdtemp()
+    with open(os.path.join(outside, "metadata.json"), "w") as f:
+        f.write('{"modules": {"secret": true}}')
+
+    traversal = "../" * 10 + outside.lstrip("/")
+    assert tm.get_backup("SOMEVIN", traversal) is None
+    print("test_get_backup_rejects_path_traversal OK")
+
+
 if __name__ == "__main__":
     test_basic_transaction()
+    test_get_backup_rejects_path_traversal()

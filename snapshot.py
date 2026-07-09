@@ -32,6 +32,16 @@ def _slug(text):
     return re.sub(r"[^a-z0-9]+", "_", (text or "snapshot").lower()).strip("_")
 
 
+def _safe_vin(vin):
+    """Sanitize a VIN before it's joined into a filesystem path -- it can
+    come straight from an HTTP query param (diag_ui.py's
+    /api/snapshots?vin=), and an unsanitized ".." there is a path-traversal
+    primitive out of BACKUP_ROOT. Case-preserving (real VINs are
+    uppercase), unlike _slug()."""
+    s = re.sub(r"[^A-Za-z0-9._-]", "_", vin or "")
+    return s if s not in ("", ".", "..") else "_"
+
+
 def _try_coding(addr):
     """Return a coding decoder result for a module if coding.py knows it."""
     try:
@@ -87,7 +97,7 @@ def create_snapshot(adapter, vin=None, description="", mileage_km=None):
         "modules": modules,
     }
 
-    outdir = os.path.join(BACKUP_ROOT, vin, "snapshots",
+    outdir = os.path.join(BACKUP_ROOT, _safe_vin(vin), "snapshots",
                           f"{ts:%Y%m%d_%H%M%S}_{_slug(description)}")
     os.makedirs(outdir, exist_ok=True)
     with open(os.path.join(outdir, "metadata.json"), "w") as f:
@@ -101,7 +111,7 @@ def list_snapshots(vin=None):
     out = []
     if not os.path.isdir(BACKUP_ROOT):
         return out
-    vins = [vin] if vin else [d for d in os.listdir(BACKUP_ROOT)
+    vins = [_safe_vin(vin)] if vin else [d for d in os.listdir(BACKUP_ROOT)
                               if os.path.isdir(os.path.join(BACKUP_ROOT, d))]
     for v in vins:
         sdir = os.path.join(BACKUP_ROOT, v, "snapshots")
@@ -125,8 +135,18 @@ def list_snapshots(vin=None):
 
 
 def load_snapshot(path):
+    """Load a snapshot's metadata.json by path. `path` reaches here
+    straight from a client-supplied value (diag_ui.py's /api/snapshot/diff
+    passes POST body fields through unchanged) -- without a containment
+    check this is an arbitrary-file-read (any *.json path, or any
+    <dir>/metadata.json). Resolve symlinks/".." and require the real path
+    to stay under BACKUP_ROOT before opening anything."""
     meta = path if path.endswith(".json") else os.path.join(path, "metadata.json")
-    with open(meta) as f:
+    real_root = os.path.realpath(BACKUP_ROOT)
+    real_meta = os.path.realpath(meta)
+    if os.path.commonpath([real_root, real_meta]) != real_root:
+        raise ValueError(f"snapshot path outside backup root: {path}")
+    with open(real_meta) as f:
         return json.load(f)
 
 

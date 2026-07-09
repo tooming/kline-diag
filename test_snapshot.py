@@ -73,8 +73,31 @@ def test_diff_detects_new_and_module_change():
     print("test_diff_detects_new_and_module_change OK")
 
 
+def test_load_snapshot_rejects_path_outside_backup_root():
+    """diff_snapshots' a/b args come straight from an HTTP POST body
+    (diag_ui.py's /api/snapshot/diff) -- without a containment check,
+    load_snapshot would open() any *.json path the caller names."""
+    tmp = tempfile.mkdtemp()
+    snapshot.BACKUP_ROOT = tmp
+
+    outside = tempfile.mkdtemp()
+    secret_path = os.path.join(outside, "secret.json")
+    with open(secret_path, "w") as f:
+        f.write('{"modules": {"leaked": true}}')
+
+    try:
+        snapshot.load_snapshot(secret_path)
+        assert False, "arbitrary file read was not blocked"
+    except ValueError:
+        pass
+    shutil.rmtree(tmp)
+    shutil.rmtree(outside)
+    print("test_load_snapshot_rejects_path_outside_backup_root OK")
+
+
 if __name__ == "__main__":
     test_create_and_list()
     test_diff_detects_cleared()
     test_diff_detects_new_and_module_change()
+    test_load_snapshot_rejects_path_outside_backup_root()
     print("\nAll snapshot tests passed.")

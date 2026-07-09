@@ -272,13 +272,48 @@ def push_passport(vin):
         raise CloudError("not signed in -- sign in (personal or workshop) "
                          "before pushing")
 
+    # Events can carry producer.type "Workshop" purely from the local
+    # self-asserted identity (ovpf_producer.set_workshop) -- no DNS/OTP
+    # behind it. Uploading that claim as-is would put an unverified
+    # "Workshop: <name> @ <domain>" stamp on a cloud passport, which reads
+    # as a real workshop to anyone viewing it. Only push it if there's a
+    # currently signed-in cloud workshop session (real OTP-verified against
+    # that DNS-verified domain) backing the same domain -- otherwise refuse
+    # the whole batch rather than silently uploading an unverifiable claim.
+    ws_session = get_workshop_session()
+    for ev in to_send:
+        producer = ev.get("producer", {})
+        if producer.get("type") != "Workshop":
+            continue
+        domain = producer.get("domain")
+        if not (domain and ws_session and ws_session.get("domain") == domain):
+            raise CloudError(
+                f"events are attributed to self-asserted workshop "
+                f"'{producer.get('name', '?')}'"
+                f"{' @ ' + domain if domain else ''}, which isn't "
+                "cloud-verified -- verify that workshop domain (sign in as "
+                "workshop) or clear the local workshop identity before "
+                "pushing")
+
     ensure_registered(passport_id, session)
 
     pushed, errors = 0, []
     for ev in to_send:
         sess = best_auth_session(ev.get("producer", {}).get("domain")) or session
+        # Defense in depth on top of the Workshop-domain check above: no
+        # local code path sets producer.verified today (see
+        # ovpf_producer._producer / test_ovpf_producer's assertion that it
+        # never appears), but nothing here should *trust* that stays true --
+        # a hand-edited or corrupted local .ovpf.ndjson could carry one.
+        # Only the provider gets to stamp "verified"; strip it from
+        # whatever we're about to upload rather than forwarding it as-is.
+        send_ev = ev
+        if "verified" in ev.get("producer", {}):
+            send_ev = dict(ev)
+            send_ev["producer"] = {k: v for k, v in ev["producer"].items()
+                                   if k != "verified"}
         status, body = _request("POST", f"/v1/passports/{passport_id}/events",
-                                ev, token=sess["token"])
+                                send_ev, token=sess["token"])
         if status in (200, 201, 409):
             # 409 = the provider already has this event (e.g. a previous
             # push succeeded server-side but crashed/errored locally

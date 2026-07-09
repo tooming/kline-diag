@@ -27,3 +27,4 @@ vag_log_*.csv
 passports/
 workshop.json
 cloud_session.json
+vehicle_names.json

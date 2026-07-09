@@ -140,6 +140,38 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(len(result["errors"]), 1)
 
+    def test_push_passport_blocks_unverified_self_asserted_workshop(self):
+        """The local Workshop panel (ovpf_producer.set_workshop) is
+        self-asserted, no DNS/OTP behind it. Signing into the cloud with a
+        personal session and pushing must not smuggle that unverified name
+        onto the passport as if it were a real workshop."""
+        prod.set_workshop("Tooming Workshop", domain="skoor.ee")
+        prod.ensure_passport(self.vin)
+        prod.record_odometer(self.vin, 123456)
+        cloud.set_user_session("me@example.com", "tok")
+
+        fake = FakeHttp([])
+        cloud._request = fake
+        with self.assertRaises(cloud.CloudError):
+            cloud.push_passport(self.vin)
+        self.assertEqual(fake.calls, [])  # refused before any network call
+
+    def test_push_passport_allows_verified_workshop_domain_match(self):
+        prod.set_workshop("Tooming Workshop", domain="skoor.ee")
+        prod.ensure_passport(self.vin)
+        prod.record_odometer(self.vin, 123456)
+        cloud.set_workshop_session("skoor.ee", "ws-tok")
+
+        fake = FakeHttp([
+            (201, {"ok": True}),
+            (200, {"id": "ev1"}),
+            (200, {"id": "ev2"}),
+        ])
+        cloud._request = fake
+        result = cloud.push_passport(self.vin)
+        self.assertEqual(result["pushed"], 2)
+        self.assertEqual(result["errors"], [])
+
     def test_push_passport_treats_409_duplicate_as_synced(self):
         """A 409 means the provider already has this event -- e.g. a
         previous push succeeded server-side but the local sync-tracking
