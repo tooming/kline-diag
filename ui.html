@@ -275,6 +275,8 @@
           <button id="pp_service_btn">Log</button>
         </div>
         <div id="pp_service_result" class="muted" style="font-size:11px;margin:4px 0 2px"></div>
+        <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Cloud sync</h3>
+        <div id="pp_cloud"></div>
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">History</h3>
         <div id="pp_timeline"></div>
         <div id="pp_scanwrap" style="display:none;margin-top:10px">
@@ -2884,6 +2886,74 @@ async function loadPassport() {
       <span class="muted" style="font-size:11px">${e.producer || ""}</span>
       <span class="muted" style="font-size:11px;min-width:104px;text-align:right">${when}</span></div>`;
   }).join("") : '<div class="muted">No events yet — scan a module or read faults to start the history.</div>';
+  loadCloudSync();
+}
+
+// ---- Cloud sync (push local passport events to the OVP provider) ----
+async function loadCloudSync() {
+  const box = $("pp_cloud");
+  if (!box) return;
+  const s = await api("/api/cloud/session");
+  const sync = s.sync || { total: 0, pending: 0, synced: 0 };
+  const signedIn = s.user || s.workshop;
+  if (!signedIn) {
+    box.innerHTML = `
+      <div class="muted" style="font-size:11px;margin-bottom:6px">
+        Not signed in — sign in to push this passport's ${sync.pending} pending
+        event(s) to passport.skoor.ee. Any email works, verified by a one-time code.
+      </div>
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+        <input id="pp_cloud_email" type="email" placeholder="email" style="flex:1;min-width:160px">
+        <button id="pp_cloud_otp_req_btn">Send code</button>
+      </div>
+      <div class="row" id="pp_cloud_code_row" style="display:none;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
+        <input id="pp_cloud_code" placeholder="code from email" style="width:140px">
+        <button id="pp_cloud_otp_verify_btn">Verify</button>
+      </div>
+      <div id="pp_cloud_status" class="muted" style="font-size:11px;margin-top:4px"></div>`;
+    $("pp_cloud_otp_req_btn").onclick = async () => {
+      const status = $("pp_cloud_status");
+      const email = $("pp_cloud_email").value.trim();
+      if (!email) { status.textContent = "Enter an email first."; return; }
+      const r = await api("/api/cloud/otp/request", { email });
+      status.textContent = r.error ? "Error: " + r.error : "Code sent — check your email.";
+      if (!r.error) $("pp_cloud_code_row").style.display = "flex";
+    };
+    $("pp_cloud_otp_verify_btn").onclick = async () => {
+      const status = $("pp_cloud_status");
+      const email = $("pp_cloud_email").value.trim();
+      const code = $("pp_cloud_code").value.trim();
+      if (!code) { status.textContent = "Enter the code from the email."; return; }
+      const r = await api("/api/cloud/otp/verify", { email, code });
+      if (r.error) { status.textContent = "Error: " + r.error; return; }
+      loadCloudSync();
+    };
+    return;
+  }
+  const who = s.workshop ? `workshop ${s.workshop.domain}` : s.user.email;
+  box.innerHTML = `
+    <div style="font-size:12px;margin-bottom:6px">
+      Signed in as <strong>${who}</strong>
+      · ${sync.synced}/${sync.total} events synced
+      ${sync.pending ? ` · <span style="color:var(--warn)">${sync.pending} pending</span>` : ""}
+      <a href="#" id="pp_cloud_signout" style="margin-left:8px;font-size:11px">sign out</a>
+    </div>
+    <button id="pp_cloud_push_btn" ${sync.pending ? "" : "disabled"}>☁️ Push to cloud</button>
+    <div id="pp_cloud_status" class="muted" style="font-size:11px;margin-top:4px"></div>`;
+  $("pp_cloud_signout").onclick = async (e) => {
+    e.preventDefault();
+    await api(s.workshop ? "/api/cloud/workshop/signout" : "/api/cloud/signout", {});
+    loadCloudSync();
+  };
+  $("pp_cloud_push_btn").onclick = async () => {
+    const btn = $("pp_cloud_push_btn"), status = $("pp_cloud_status");
+    btn.disabled = true;
+    const r = await api("/api/cloud/push", {});
+    if (r.error) { status.textContent = "Error: " + r.error; btn.disabled = false; return; }
+    status.textContent = `Pushed ${r.pushed} event(s).` +
+      (r.errors && r.errors.length ? ` ${r.errors.length} failed.` : "");
+    loadCloudSync();
+  };
 }
 
 // QR scanning via the browser's native BarcodeDetector (offline, client-side)

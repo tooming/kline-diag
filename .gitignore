@@ -26,3 +26,4 @@ vag_log_*.csv
 # OVPF passport event logs (contain VIN / vehicle data)
 passports/
 workshop.json
+cloud_session.json

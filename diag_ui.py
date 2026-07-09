@@ -1244,6 +1244,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 500)
         if self.path == "/api/workshop":
             return self._json({"workshop": ovpf_producer.get_workshop()})
+        if self.path == "/api/cloud/session":
+            # Cloud sign-in status (separate from the local, self-asserted
+            # workshop profile above) + how many local events are queued
+            # to push for the current VIN, if any.
+            import ovpf_cloud
+            return self._json({"user": ovpf_cloud.get_user_session(),
+                              "workshop": ovpf_cloud.get_workshop_session(),
+                              "sync": ovpf_cloud.sync_status(_current_vin())})
         if self.path == "/api/garage":
             # Every vehicle this laptop has a passport for, not just
             # whichever one is currently connected -- the workshop's
@@ -2384,6 +2392,86 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/workshop/clear":
                 ovpf_producer.clear_workshop()
                 self._json({"workshop": None})
+            elif self.path == "/api/cloud/otp/request":
+                # Personal cloud identity -- any email, OTP-verified,
+                # satisfies the provider's write gate (no pre-existing
+                # account needed). See ovpf_cloud.py.
+                import ovpf_cloud
+                b = self._body()
+                email = (b.get("email") or "").strip()
+                if not email:
+                    return self._json({"error": "email required"}, 400)
+                try:
+                    self._json(ovpf_cloud.request_otp(email))
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/cloud/otp/verify":
+                import ovpf_cloud
+                b = self._body()
+                email = (b.get("email") or "").strip()
+                code = (b.get("code") or "").strip()
+                if not (email and code):
+                    return self._json({"error": "email and code required"}, 400)
+                try:
+                    ovpf_cloud.verify_otp(email, code)
+                    self._json({"user": ovpf_cloud.get_user_session()})
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/cloud/signout":
+                import ovpf_cloud
+                ovpf_cloud.clear_user_session()
+                self._json({"user": None})
+            elif self.path == "/api/cloud/workshop/verify":
+                # DNS verification check for a workshop domain -- no auth,
+                # this only reads DNS, doesn't grant anything.
+                import ovpf_cloud
+                b = self._body()
+                domain = (b.get("domain") or "").strip()
+                if not domain:
+                    return self._json({"error": "domain required"}, 400)
+                try:
+                    self._json(ovpf_cloud.check_workshop_verified(domain))
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/cloud/workshop/otp/request":
+                import ovpf_cloud
+                b = self._body()
+                domain = (b.get("domain") or "").strip()
+                email = (b.get("email") or "").strip()
+                if not (domain and email):
+                    return self._json({"error": "domain and email required"}, 400)
+                try:
+                    self._json(ovpf_cloud.request_workshop_otp(domain, email))
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/cloud/workshop/otp/verify":
+                import ovpf_cloud
+                b = self._body()
+                domain = (b.get("domain") or "").strip()
+                email = (b.get("email") or "").strip()
+                code = (b.get("code") or "").strip()
+                if not (domain and email and code):
+                    return self._json(
+                        {"error": "domain, email and code required"}, 400)
+                try:
+                    ovpf_cloud.verify_workshop_otp(domain, email, code)
+                    self._json({"workshop": ovpf_cloud.get_workshop_session()})
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
+            elif self.path == "/api/cloud/workshop/signout":
+                import ovpf_cloud
+                ovpf_cloud.clear_workshop_session()
+                self._json({"workshop": None})
+            elif self.path == "/api/cloud/push":
+                # Push the current (or an explicitly named, for the garage
+                # view) VIN's local passport events to the cloud provider.
+                import ovpf_cloud
+                b = self._body()
+                vin = (b.get("vin") or "").strip() or _current_vin()
+                try:
+                    self._json(ovpf_cloud.push_passport(vin))
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
             elif self.path == "/api/garage/service":
                 # Log a service against any vehicle in the garage, not
                 # just the one currently connected (see /api/passport/service
