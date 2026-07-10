@@ -45,6 +45,23 @@ class ProducerTest(unittest.TestCase):
         self.assertEqual(first["type"], "PassportOpened")
         self.assertEqual(first["data"]["vehicle"]["vin"], self.vin)
 
+    def test_ensure_passport_reuses_cloud_pulled_file_by_vin(self):
+        """A passport pulled from the cloud (ovpf_cloud.pull_passport) is
+        cached under the provider's own uuid, not the VIN. Reconnecting to
+        that same car locally must reuse it, not mint a duplicate."""
+        urn = "urn:ovpf:019f485f-e91a-7000-bf55-5a9558b26ac5"
+        path = os.path.join(prod._passports_dir(),
+                            "019f485f-e91a-7000-bf55-5a9558b26ac5.ovpf.ndjson")
+        ovpf_core.append(path, ovpf_core.envelope(
+            urn, "PassportOpened",
+            {"vehicle": {"type": "Vehicle", "vin": self.vin}}, prod.MANUAL))
+
+        result_path, result_urn = prod.ensure_passport(self.vin)
+
+        self.assertEqual(result_urn, urn)
+        self.assertEqual(result_path, path)
+        self.assertEqual(len(os.listdir(prod._passports_dir())), 1)
+
     def test_faults_then_clear_reduces_to_zero_open(self):
         prod.record_faults(self.vin, 0x12, "DME", {
             "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",

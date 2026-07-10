@@ -141,6 +141,15 @@ def ensure_passport(vin):
         first = _read_first(path)
         if first:
             return path, first["vehicle"]
+        # Not under the VIN-named file -- but a passport for this exact
+        # VIN might already exist under a different filename (see
+        # _path_for_vin) if it was ever pulled from the cloud rather than
+        # opened locally first. Reuse it instead of minting a duplicate.
+        existing = _path_for_vin(vin) if vin else None
+        if existing:
+            first = _read_first(existing)
+            if first:
+                return existing, first["vehicle"]
         urn = "urn:ovpf:" + ovpf_core.uuid7()
         vehicle = {"type": "Vehicle"}
         if vin:
@@ -301,6 +310,32 @@ def passport_state(vin):
     state["passport_urn"] = state.get("passport")
     state["name"] = get_vehicle_name(state["passport_urn"])
     return state
+
+
+def _path_for_vin(vin):
+    """Find a passport file by an already-recorded VIN fact, even if the
+    file itself isn't named after that VIN.
+
+    A passport pulled from the cloud (see ovpf_cloud.pull_passport) is
+    cached locally under the provider's own uuid, not the VIN -- a plain
+    _log_path(vin) lookup misses it, so ensure_passport() would otherwise
+    mint a brand new duplicate passport for a car that was already
+    diagnosed (and already has cloud history) the moment you reconnect to
+    it locally. Same fix shape as _path_for_urn, scanning by content
+    instead of trusting the filename."""
+    if not vin:
+        return None
+    for fname in os.listdir(_passports_dir()):
+        if not fname.endswith(".ovpf.ndjson"):
+            continue
+        path = os.path.join(_passports_dir(), fname)
+        events = ovpf_core.load(path)
+        if not events:
+            continue
+        state = ovpf_core.reduce(events)
+        if (state.get("vehicle") or {}).get("vin") == vin:
+            return path
+    return None
 
 
 def _path_for_urn(urn):
