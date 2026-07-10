@@ -31,6 +31,10 @@ PID_NAMES = {
     0x10: "MAF g/s", 0x11: "throttle %", 0x1F: "run time s",
     0x33: "barometric pressure kPa",
     0x42: "control module V", 0x5C: "oil temp C",
+    0x14: "O2 sensor 1 V", 0x15: "O2 sensor 2 V",
+    0x16: "O2 sensor 3 V", 0x17: "O2 sensor 4 V",
+    0x18: "O2 sensor 5 V", 0x19: "O2 sensor 6 V",
+    0x1A: "O2 sensor 7 V", 0x1B: "O2 sensor 8 V",
 }
 
 
@@ -58,6 +62,8 @@ def decode_pid(pid, data):
         return data[0] * 100.0 / 255.0
     if pid == 0x1F and len(data) >= 2:
         return (data[0] << 8) | data[1]
+    if 0x14 <= pid <= 0x1B and data:  # SAE J1979: byte A = voltage/200, byte B (unused here) = per-bank STFT
+        return round(data[0] / 200.0, 3)
     if pid == 0x42 and len(data) >= 2:
         return ((data[0] << 8) | data[1]) / 1000.0
     if pid == 0x5C and data:

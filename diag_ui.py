@@ -606,6 +606,26 @@ class E87Adapter:
          "group": "Engine", "graph": False},
         {"id": "baro_kpa", "label": "Barometric Pressure", "unit": "kPa",
          "group": "Engine", "graph": False},
+        # UNVERIFIED against real hardware, same as map_kpa/baro_kpa above --
+        # whether this DME answers PIDs 0x14-0x17 at all hasn't been tested.
+        # Labeled by raw PID slot, not by claimed bank/pre-post-cat position:
+        # SAE J1979 splits O2 sensor location across two possible bitmap
+        # configs (PID 0x13 vs 0x1D), and this DME's config isn't confirmed.
+        # Once `power_diag.py pids` (or a live scan) shows which of these
+        # respond, cross-reference PID 0x13's presence bitmap to relabel the
+        # ones that answer as e.g. "O2 Bank 1 Pre-Cat" -- relevant here since
+        # the DME has stored 29F4/29F5 (Bank 1/2 catalyst efficiency, see
+        # backups/WBAXXXXXXXXXXXXXX/20260709_225920_clear_faults), and a
+        # post-cat sensor bouncing 0.1-0.9V like the pre-cat one would
+        # confirm a worn catalyst rather than a sensor/fueling fault.
+        {"id": "o2_s1", "label": "O2 Sensor 1 (PID 0x14)", "unit": "V",
+         "group": "Fuel", "graph": False},
+        {"id": "o2_s2", "label": "O2 Sensor 2 (PID 0x15)", "unit": "V",
+         "group": "Fuel", "graph": False},
+        {"id": "o2_s3", "label": "O2 Sensor 3 (PID 0x16)", "unit": "V",
+         "group": "Fuel", "graph": False},
+        {"id": "o2_s4", "label": "O2 Sensor 4 (PID 0x17)", "unit": "V",
+         "group": "Fuel", "graph": False},
     ]
     # PIDs confirmed supported by this car's DME (power_diag.py pids output);
     # channel id -> Mode-01 PID, decoded via obd2.decode_pid (same SAE J1979
@@ -614,8 +634,9 @@ class E87Adapter:
         "rpm": 0x0C, "coolant_c": 0x05, "speed_kmh": 0x0D,
         "engine_load": 0x04, "throttle": 0x11, "iat_c": 0x0F, "maf": 0x10,
         "timing_advance": 0x0E, "stft": 0x06, "ltft": 0x07,
-        # unverified -- see the map_kpa/baro_kpa live_channels comment above
+        # unverified -- see the map_kpa/baro_kpa/o2_s1..4 live_channels comments above
         "map_kpa": 0x0B, "baro_kpa": 0x33,
+        "o2_s1": 0x14, "o2_s2": 0x15, "o2_s3": 0x16, "o2_s4": 0x17,
     }
     # kW per g/s of MAF -- calibrated per specific car, keyed by VIN, where
     # a real WOT pull's peak MAF plus the engine's known factory rating
