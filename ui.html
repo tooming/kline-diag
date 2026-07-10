@@ -524,10 +524,13 @@
       </div>
       <div id="zoomtoolbar" style="display:none;margin-top:6px;gap:6px;flex-wrap:wrap" class="row">
         <span id="zoomselinfo" class="muted" style="font-size:11px"></span>
-        <button id="zoomtosel_btn" style="font-size:11px">🔍 Zoom to selection</button>
         <button id="gendyno_btn" style="font-size:11px">🏁 Generate dyno from selection</button>
       </div>
-      <button id="resetzoom_btn" style="display:none;font-size:11px;margin-top:6px">↺ Reset zoom</button>
+      <div class="row" style="gap:6px;margin-top:6px">
+        <button id="zoomin_btn" style="font-size:11px" title="Zoom in">🔍+</button>
+        <button id="zoomout_btn" style="font-size:11px" title="Zoom out">🔍−</button>
+        <button id="resetzoom_btn" style="display:none;font-size:11px">↺ Reset zoom</button>
+      </div>
       <div id="replayevents" style="margin-top:10px"></div>
     </section>
     <section data-tab="analysis" id="dynosec">
@@ -542,7 +545,12 @@
       <div style="position:relative;width:100%;height:280px;margin-top:10px">
         <canvas id="dynochart"></canvas>
       </div>
-      <div id="dynolegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:12px"></div>
+      <div id="dynolinelegend" style="display:none;gap:16px;margin-top:8px;font-size:11px" class="row">
+        <span style="color:#4da3ff">── Power (kW, left axis)</span>
+        <span style="color:#eb6834">┄┄ Torque (Nm, right axis)</span>
+      </div>
+      <div id="dynolegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;font-size:12px"></div>
+      <button id="dynosave_btn" style="display:none;font-size:11px;margin-top:8px">💾 Save as image</button>
       <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Past runs — overlay for comparison</h3>
       <div id="dynoruns" class="muted">Connect to a vehicle (or browse one from the Workshop garage) to see past runs.</div>
     </section>
@@ -2286,12 +2294,6 @@ $("charts").addEventListener("mouseup", () => {
 });
 $("charts").addEventListener("mouseleave", () => { hoverT = null; redraw(); });
 
-$("zoomtosel_btn")?.addEventListener("click", () => {
-  if (!selRange) return;
-  viewDomain = { t0: selRange.t0, t1: selRange.t1 };
-  updateZoomToolbar();
-  redraw();
-});
 $("resetzoom_btn")?.addEventListener("click", () => {
   viewDomain = playheadT != null
     ? { t0: replayData?.rows?.[0]?.epoch, t1: replayData?.rows?.[replayData.rows.length - 1]?.epoch }
@@ -2299,6 +2301,46 @@ $("resetzoom_btn")?.addEventListener("click", () => {
   updateZoomToolbar();
   redraw();
 });
+
+// Step zoom in/out around the current view's midpoint -- for "I dragged too
+// tight a selection, now let me back off a bit" without a full reset. Live
+// mode (viewDomain still null) bases the step off the same rolling-120s
+// window getDomain() would fall back to.
+function currentBaseDomain() {
+  if (viewDomain) return viewDomain;
+  for (const id of charted) {
+    const pts = hist[id];
+    if (pts && pts.length) {
+      const t1 = pts[pts.length - 1].t;
+      return { t0: t1 - 120, t1 };
+    }
+  }
+  return null;
+}
+function zoomBy(factor) {
+  const base = currentBaseDomain();
+  if (!base) return;
+  const mid = (base.t0 + base.t1) / 2;
+  const span = Math.max((base.t1 - base.t0) * factor, 1);
+  let t0 = mid - span / 2, t1 = mid + span / 2;
+  // In replay, clamp to the recording's own extent -- zooming out further
+  // than "the whole file" would just show empty space either side.
+  if (replayData && replayData.rows.length) {
+    const fullT0 = replayData.rows[0].epoch;
+    const fullT1 = replayData.rows[replayData.rows.length - 1].epoch;
+    if (span >= fullT1 - fullT0) {
+      t0 = fullT0; t1 = fullT1;
+    } else {
+      if (t0 < fullT0) { t0 = fullT0; t1 = t0 + span; }
+      if (t1 > fullT1) { t1 = fullT1; t0 = t1 - span; }
+    }
+  }
+  viewDomain = { t0, t1 };
+  updateZoomToolbar();
+  redraw();
+}
+$("zoomin_btn")?.addEventListener("click", () => zoomBy(0.5));
+$("zoomout_btn")?.addEventListener("click", () => zoomBy(2));
 
 // ---- pulls (per-pull peaks, so a multi-pull session keeps every pull's
 // numbers instead of one running session-wide max) ----
@@ -2483,12 +2525,16 @@ function computeDynoCurve(rawSamples, opts) {
     torque_nm_corrected: cfFn != null ? round1(torque[i] * cfFn) : null,
     sample_count: buckets.has(rpm) ? buckets.get(rpm).length : 0,
   }));
-  const peakPower = Math.max(...bins.map(b => b.power_kw));
-  const peakTorque = Math.max(...bins.map(b => b.torque_nm));
+  // RPM-at-peak alongside the peak values themselves -- a real dyno
+  // printout always pairs them ("124 kW @ 5700 rpm"), not just the bare
+  // numbers.
+  const peakPowerBin = bins.reduce((a, b) => b.power_kw > a.power_kw ? b : a);
+  const peakTorqueBin = bins.reduce((a, b) => b.torque_nm > a.torque_nm ? b : a);
   const peaks = {
-    power_kw: peakPower, torque_nm: peakTorque,
-    power_kw_corrected: cfFn != null ? round1(peakPower * cfFn) : null,
-    torque_nm_corrected: cfFn != null ? round1(peakTorque * cfFn) : null,
+    power_kw: peakPowerBin.power_kw, power_kw_rpm: peakPowerBin.rpm,
+    torque_nm: peakTorqueBin.torque_nm, torque_nm_rpm: peakTorqueBin.rpm,
+    power_kw_corrected: cfFn != null ? round1(peakPowerBin.power_kw * cfFn) : null,
+    torque_nm_corrected: cfFn != null ? round1(peakTorqueBin.torque_nm * cfFn) : null,
   };
 
   return {
@@ -2579,7 +2625,7 @@ function renderDynoLegend() {
     const tq = pk.torque_nm_corrected ?? pk.torque_nm;
     return `<span style="display:flex;align-items:center;gap:5px">
       <span style="width:10px;height:10px;border-radius:2px;background:${c.color}"></span>
-      ${c.label} — ${pw?.toFixed(1)} kW / ${tq?.toFixed(1)} Nm
+      ${c.label} — ${pw?.toFixed(1)} kW @ ${pk.power_kw_rpm} rpm / ${tq?.toFixed(1)} Nm @ ${pk.torque_nm_rpm} rpm
       ${c.curve.correction ? (c.curve.correction.valid_range ? '' : ' <span style="color:var(--warn)">(CF out of range)</span>') : ' <span class="muted">(uncorrected)</span>'}
     </span>`;
   }).join("") || '<span class="muted">No curve to show yet.</span>';
@@ -2587,9 +2633,155 @@ function renderDynoLegend() {
 
 function updateDynoChart() {
   const cv = $("dynochart");
-  if (cv) drawDynoChart(cv, activeDynoCurves());
+  const curves = activeDynoCurves();
+  if (cv) drawDynoChart(cv, curves);
   renderDynoLegend();
+  const saveBtn = $("dynosave_btn");
+  if (saveBtn) saveBtn.style.display = curves.length ? "" : "none";
+  const lineLegend = $("dynolinelegend");
+  if (lineLegend) lineLegend.style.display = curves.length ? "flex" : "none";
 }
+
+// Exports dynochart as a PNG "dyno sheet" -- the on-screen canvas is only
+// ever cleared (transparent), fine over the dark page background, but a
+// bare toDataURL() would produce a floating, illegible-on-white line chart.
+// Redraw onto a taller offscreen canvas with a solid panel fill, a header
+// (vehicle info + date) and a footer (peak power/torque @ rpm per curve),
+// so the saved file reads as a standalone result, the way a real dyno
+// printout would, not just a cropped screenshot of the app.
+async function saveDynoImage() {
+  const cv = $("dynochart");
+  const curves = activeDynoCurves();
+  if (!cv || !curves.length) return;
+
+  let vehicleLine = "";
+  if (state.connected) {
+    try {
+      const v = await api("/api/vehicle");
+      if (!v.error) {
+        const desc = [v.year, v.model].filter(Boolean).join(" ");
+        vehicleLine = [desc, v.engine, v.vin].filter(Boolean).join(" · ");
+      }
+    } catch (e) { /* export still works without vehicle info */ }
+  }
+  if (!vehicleLine && state.vin) vehicleLine = state.vin;
+
+  const dpr = devicePixelRatio || 1;
+  const pad = 16 * dpr;
+  const headerH = (vehicleLine ? 90 : 72) * dpr;
+  const labelFont = `bold ${13 * dpr}px ui-monospace`;
+  const valueFont = `${12 * dpr}px ui-monospace`;
+  const rowH = 20 * dpr, rowGap = 8 * dpr;
+  const dateLine = `Generated ${new Date().toLocaleString()} — estimated from MAF, not a real dyno`;
+
+  // One label line + one values line per curve, "Label" / "XX.X kW @ rpm
+  // rpm  /  XX.X Nm @ rpm rpm (note)" -- splitting them (rather than one
+  // long combined line) keeps each line short enough to fit a narrow chart
+  // without shrinking the font to the point of being unreadable.
+  const footerLines = curves.map(c => {
+    const pk = c.curve.peaks;
+    const pw = pk.power_kw_corrected ?? pk.power_kw;
+    const tq = pk.torque_nm_corrected ?? pk.torque_nm;
+    const corrNote = c.curve.correction
+      ? (c.curve.correction.valid_range ? " (SAE corrected)" : " (CF out of range)")
+      : " (uncorrected)";
+    return {
+      label: c.label, color: c.color,
+      value: `${pw.toFixed(1)} kW @ ${pk.power_kw_rpm} rpm  /  ${tq.toFixed(1)} Nm @ ${pk.torque_nm_rpm} rpm${corrNote}`,
+    };
+  });
+  const footerH = (20 * dpr) + curves.length * (rowH * 2 + rowGap);
+
+  // Measure every line that'll be drawn up front and size the sheet to fit
+  // the widest one -- a long saved-run label or correction note must widen
+  // the canvas, not silently run off its right edge (the bug this replaced:
+  // a fixed chart-width canvas clipped the peak-values line entirely).
+  const mctx = document.createElement("canvas").getContext("2d");
+  let maxLineW = 0;
+  const measure = (font, text) => {
+    mctx.font = font;
+    maxLineW = Math.max(maxLineW, mctx.measureText(text).width);
+  };
+  measure(`bold ${17 * dpr}px ui-monospace`, "VIRTUAL DYNO");
+  if (vehicleLine) measure(`${12 * dpr}px ui-monospace`, vehicleLine);
+  measure(`${11 * dpr}px ui-monospace`, dateLine);
+  mctx.font = `${11 * dpr}px ui-monospace`;
+  const lineLegendW = 28 * dpr + mctx.measureText("Power (kW)").width + 24 * dpr
+                     + 28 * dpr + mctx.measureText("Torque (Nm)").width;
+  maxLineW = Math.max(maxLineW, lineLegendW);
+  for (const l of footerLines) {
+    measure(labelFont, l.label);
+    measure(valueFont, l.value);
+  }
+  const indent = 14 * dpr;
+  const outW = Math.max(cv.width, maxLineW + indent) + pad * 2;
+
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = headerH + cv.height + footerH + pad * 2;
+  const ctx = out.getContext("2d");
+
+  ctx.fillStyle = "#242a34";
+  ctx.fillRect(0, 0, out.width, out.height);
+
+  ctx.fillStyle = "#dfe6ee";
+  ctx.font = `bold ${17 * dpr}px ui-monospace`;
+  ctx.fillText("VIRTUAL DYNO", pad, pad + 18 * dpr);
+  let y = pad + 36 * dpr;
+  if (vehicleLine) {
+    ctx.fillStyle = "#c3cad4";
+    ctx.font = `${12 * dpr}px ui-monospace`;
+    ctx.fillText(vehicleLine, pad, y);
+    y += 18 * dpr;
+  }
+  ctx.fillStyle = "#8b97a5";
+  ctx.font = `${11 * dpr}px ui-monospace`;
+  ctx.fillText(dateLine, pad, y);
+  y += 24 * dpr;
+
+  // Line-style legend -- solid=Power/dashed=Torque applies to every curve
+  // regardless of its color, so this is drawn once, separately from the
+  // per-run color legend in the footer below.
+  ctx.lineWidth = 2 * dpr;
+  ctx.strokeStyle = "#4da3ff";
+  ctx.beginPath(); ctx.moveTo(pad, y - 4 * dpr); ctx.lineTo(pad + 22 * dpr, y - 4 * dpr); ctx.stroke();
+  ctx.fillStyle = "#4da3ff";
+  ctx.font = `${11 * dpr}px ui-monospace`;
+  ctx.fillText("Power (kW)", pad + 28 * dpr, y);
+  const tqLegendX = pad + 28 * dpr + ctx.measureText("Power (kW)").width + 24 * dpr;
+  ctx.strokeStyle = "#eb6834";
+  ctx.setLineDash([5 * dpr, 3 * dpr]);
+  ctx.beginPath(); ctx.moveTo(tqLegendX, y - 4 * dpr); ctx.lineTo(tqLegendX + 22 * dpr, y - 4 * dpr); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#eb6834";
+  ctx.fillText("Torque (Nm)", tqLegendX + 28 * dpr, y);
+
+  ctx.drawImage(cv, pad, headerH + pad);
+
+  let fy = headerH + pad + cv.height + 20 * dpr;
+  ctx.font = `${10 * dpr}px ui-monospace`;
+  ctx.fillStyle = "#8b97a5";
+  ctx.fillText("PEAK VALUES", pad, fy);
+  fy += rowH + rowGap;
+  for (const l of footerLines) {
+    ctx.fillStyle = l.color;
+    ctx.fillRect(pad, fy - 9 * dpr, 9 * dpr, 9 * dpr);
+    ctx.fillStyle = "#dfe6ee";
+    ctx.font = labelFont;
+    ctx.fillText(l.label, pad + indent, fy);
+    fy += rowH;
+    ctx.fillStyle = "#c3cad4";
+    ctx.font = valueFont;
+    ctx.fillText(l.value, pad + indent, fy);
+    fy += rowH + rowGap;
+  }
+
+  const a = document.createElement("a");
+  a.download = `dyno_${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+  a.href = out.toDataURL("image/png");
+  a.click();
+}
+$("dynosave_btn")?.addEventListener("click", saveDynoImage);
 
 function setDynoCurrent(curve, label) {
   if (curve.insufficient) {
@@ -2598,7 +2790,7 @@ function setDynoCurrent(curve, label) {
   } else {
     const pk = curve.peaks;
     const pw = pk.power_kw_corrected ?? pk.power_kw, tq = pk.torque_nm_corrected ?? pk.torque_nm;
-    $("dyno_current").innerHTML = `<strong>${wsEsc(label)}</strong> — ${pw.toFixed(1)} kW / ${tq.toFixed(1)} Nm` +
+    $("dyno_current").innerHTML = `<strong>${wsEsc(label)}</strong> — ${pw.toFixed(1)} kW @ ${pk.power_kw_rpm} rpm / ${tq.toFixed(1)} Nm @ ${pk.torque_nm_rpm} rpm` +
       (curve.gear_shift_detected ? ` <span class="muted">(gear shift detected, showing ${curve.bins[0].rpm}–${curve.bins[curve.bins.length-1].rpm} rpm only)</span>` : "") +
       (curve.correction && !curve.correction.valid_range ? ` <span style="color:var(--warn)">correction factor out of validated range (${curve.correction.cf.toFixed(3)}) — treat corrected values with caution</span>` : "");
     dynoCurrent = { label, color: DYNO_COLORS[0], curve };
