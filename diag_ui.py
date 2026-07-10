@@ -2778,14 +2778,20 @@ class Handler(BaseHTTPRequestHandler):
                 path, urn = ovpf_producer.ensure_passport(_current_vin())
                 self._json(ovpf_producer.passport_state(_current_vin()))
             elif self.path == "/api/passport/identify":
-                # Attach vehicle facts (VIN, make/model/year/engine) to a
-                # passport that was created without them. Appends
+                # Attach vehicle facts (VIN, make/model/year/engine, nickname)
+                # to a passport that was created without them. Appends
                 # VehicleIdentified -- reduce() merges it into state.vehicle,
                 # the PassportOpened genesis event is never touched. Same
                 # "person is asserting this" contract as /service: no
-                # connection required, see _current_vin().
+                # connection required, see _current_vin(). nickname here is
+                # the *shared* one (visible to anyone with the passport
+                # link, part of the permanent hash-chained history) --
+                # deliberately distinct from set_vehicle_name's local-only
+                # private label (see its docstring for the privacy
+                # rationale); the UI labels the two very differently for
+                # exactly this reason.
                 b = self._body()
-                facts = {k: b[k] for k in ("vin", "make", "model", "modelYear", "engine")
+                facts = {k: b[k] for k in ("nickname", "vin", "make", "model", "modelYear", "engine")
                           if b.get(k)}
                 if not facts:
                     return self._json({"error": "at least one vehicle fact required"}, 400)

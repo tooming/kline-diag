@@ -262,6 +262,7 @@
               <input id="pp_name" placeholder="Name this vehicle (e.g. &quot;The E39&quot;)" style="flex:1;min-width:160px;font-size:12px">
               <button id="pp_name_btn" style="font-size:11px">Save</button>
             </div>
+            <div class="muted" style="font-size:10px;margin:0 0 4px">Private label, only visible to you here -- doesn't appear on the shared passport. Use "Vehicle info" below to set a nickname others see.</div>
             <div id="pp_meta" class="muted" style="font-size:12px;margin:4px 0 4px"></div>
             <div id="pp_url" style="font-size:12px;margin:0 0 12px"></div>
             <div id="pp_stats" style="display:flex;gap:10px;flex-wrap:wrap"></div>
@@ -274,7 +275,9 @@
         </div>
         <div id="pp_identify_section">
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Vehicle info</h3>
+        <div class="muted" style="font-size:10px;margin:0 0 4px">Appends a permanent VehicleIdentified event -- visible to anyone with the passport link, including the nickname below (unlike the private label above).</div>
         <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="pp_nickname" placeholder="Nickname (shown on the shared passport)" style="flex:1;min-width:180px">
           <input id="pp_vin" placeholder="VIN (optional)" style="flex:1;min-width:140px">
           <input id="pp_make" placeholder="Make" style="width:100px">
           <input id="pp_model" placeholder="Model" style="width:100px">
@@ -4295,6 +4298,7 @@ $("pp_name_btn").onclick = async () => {
 $("pp_identify_btn").onclick = async () => {
   const result = $("pp_identify_result");
   const facts = {
+    nickname: $("pp_nickname").value.trim(),
     vin: $("pp_vin").value.trim(), make: $("pp_make").value.trim(),
     model: $("pp_model").value.trim(), modelYear: $("pp_year").value.trim(),
   };
@@ -4302,7 +4306,7 @@ $("pp_identify_btn").onclick = async () => {
   const r = await api("/api/passport/identify", facts);
   if (r.error) { result.textContent = "Error: " + r.error; return; }
   result.textContent = "Saved.";
-  $("pp_vin").value = ""; $("pp_make").value = ""; $("pp_model").value = ""; $("pp_year").value = "";
+  $("pp_nickname").value = ""; $("pp_vin").value = ""; $("pp_make").value = ""; $("pp_model").value = ""; $("pp_year").value = "";
   loadPassport();
 };
 $("pp_service_btn").onclick = async () => {
