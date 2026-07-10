@@ -2674,7 +2674,14 @@ function computeDynoCurve(rawSamples, opts) {
 
   // SAE/DIN correction, using window-aggregate pressure/temperature.
   let correction = null;
-  const mapVals = samples.map(s => s.map_kpa).filter(v => v != null);
+  // >0 excludes an unwired/not-yet-implemented MAP PID reading flat 0 --
+  // found live on the E39, whose P7 always reads 0.0 (never actually
+  // verified against real hardware, see E39Adapter's live_channels
+  // comment). Math.max(...[0]) would otherwise pass the length check
+  // below and feed 0 straight into 99.21/Pd_kpa, silently producing
+  // Infinity instead of just skipping a correction that has no real data
+  // to work from.
+  const mapVals = samples.map(s => s.map_kpa).filter(v => v != null && v > 0);
   const iatVals = samples.map(s => s.iat_c).filter(v => v != null);
   let cfFn = null;
   if (mapVals.length && iatVals.length) {
