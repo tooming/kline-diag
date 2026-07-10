@@ -2884,6 +2884,21 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(ovpf_cloud.push_passport(vin, urn))
                 except ovpf_cloud.CloudError as e:
                     self._json({"error": str(e)}, 400)
+            elif self.path == "/api/cloud/pull":
+                # Merge in any events that exist on the cloud provider but
+                # not locally -- the counterpart to push, for edits made
+                # independently on the cloud side (e.g. a nickname changed
+                # via the passport.skoor.ee web viewer, which writes
+                # straight to the provider and never reaches this device
+                # any other way). See ovpf_cloud.pull_and_merge_passport.
+                import ovpf_cloud
+                b = self._body()
+                vin = (b.get("vin") or "").strip() or _current_vin()
+                urn = (b.get("urn") or "").strip() or None
+                try:
+                    self._json(ovpf_cloud.pull_and_merge_passport(vin, urn))
+                except ovpf_cloud.CloudError as e:
+                    self._json({"error": str(e)}, 400)
             elif self.path == "/api/dyno/save":
                 # Persist a curve computed client-side (ui.html's
                 # computeDynoCurve -- see its comment for why this is the

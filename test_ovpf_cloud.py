@@ -209,6 +209,89 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(result2["skipped"], 2)
         self.assertEqual(fake2.calls, [])
 
+    class _FakeResponse:
+        """Minimal stand-in for what urllib.request.urlopen()'s context
+        manager returns -- pull_and_merge_passport/_fetch_export only ever
+        call .read()."""
+        def __init__(self, text):
+            self._data = text.encode("utf-8")
+
+        def read(self):
+            return self._data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def _patch_export_response(self, ndjson_text):
+        """_fetch_export() (unlike the JSON POST calls above) goes straight
+        through urllib.request.urlopen, not the cloud._request seam -- no
+        existing test exercises that path, so this patches it directly for
+        the duration of one call. Returns the teardown callable."""
+        import ovpf_cloud
+        orig = ovpf_cloud.urllib.request.urlopen
+        ovpf_cloud.urllib.request.urlopen = (
+            lambda req, timeout=10.0, context=None: self._FakeResponse(ndjson_text))
+        def restore():
+            ovpf_cloud.urllib.request.urlopen = orig
+        self.addCleanup(restore)
+
+    def test_pull_and_merge_passport_adds_remote_only_event(self):
+        """The scenario this exists for: a nickname (or any other edit)
+        made through the web viewer writes straight to the cloud provider
+        and never reaches this device through push_passport (that's local
+        -> cloud only) -- pull_and_merge_passport is the other direction."""
+        import ovpf_core
+        path, urn = prod.ensure_passport(self.vin)
+        local_events = ovpf_core.load(path)
+
+        remote_only = ovpf_core.envelope(
+            urn, "VehicleIdentified", {"vehicle": {"nickname": "Nicky"}},
+            {"type": "Owner", "name": "someone@example.com"})
+        remote_events = ovpf_core.seal(local_events + [dict(remote_only)])
+        import json
+        remote_ndjson = "\n".join(json.dumps(e) for e in remote_events) + "\n"
+        self._patch_export_response(remote_ndjson)
+
+        result = cloud.pull_and_merge_passport(self.vin)
+        self.assertEqual(result["added"], 1)
+        self.assertEqual(result["conflicts"], [])
+
+        merged = ovpf_core.load(path)
+        self.assertEqual(len(merged), len(local_events) + 1)
+        self.assertEqual(ovpf_core.verify_chain(merged), [])
+        state = ovpf_core.reduce(merged)
+        self.assertEqual(state["vehicle"].get("nickname"), "Nicky")
+
+        # already-synced ids are marked so a follow-up push doesn't
+        # try to re-upload the event that just came *from* the cloud
+        synced = cloud._load_synced_ids(path)
+        self.assertIn(remote_only["id"], synced)
+
+    def test_pull_and_merge_passport_flags_real_conflict_without_overwriting_local(self):
+        """Same event id, genuinely different content (not just a
+        provider-added verified stamp) -- reported as a conflict, and the
+        local copy is kept rather than silently replaced either way."""
+        import ovpf_core
+        path, urn = prod.ensure_passport(self.vin)
+        local_events = ovpf_core.load(path)
+
+        tampered = dict(local_events[0])
+        tampered["data"] = {"vehicle": {"vin": "SOMETHING-ELSE"}}
+        remote_ndjson = "\n".join(
+            __import__("json").dumps(e)
+            for e in [tampered] + local_events[1:]) + "\n"
+        self._patch_export_response(remote_ndjson)
+
+        result = cloud.pull_and_merge_passport(self.vin)
+        self.assertEqual(result["added"], 0)
+        self.assertIn(local_events[0]["id"], result["conflicts"])
+
+        merged = ovpf_core.load(path)
+        self.assertEqual(merged[0]["data"], local_events[0]["data"])
+
     def test_sync_status_reports_pending_count(self):
         prod.ensure_passport(self.vin)
         prod.record_odometer(self.vin, 1000)

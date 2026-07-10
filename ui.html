@@ -4177,6 +4177,7 @@ async function loadCloudSync() {
       <a href="#" id="pp_cloud_signout" style="margin-left:8px;font-size:11px">sign out</a>
     </div>
     <button id="pp_cloud_push_btn" ${sync.pending ? "" : "disabled"}>☁️ Push to cloud</button>
+    <button id="pp_cloud_pull_btn" style="margin-left:6px">⬇️ Pull from cloud</button>
     <div id="pp_cloud_status" class="muted" style="font-size:11px;margin-top:4px"></div>`;
   $("pp_cloud_signout").onclick = async (e) => {
     e.preventDefault();
@@ -4191,6 +4192,23 @@ async function loadCloudSync() {
     status.textContent = `Pushed ${r.pushed} event(s).` +
       (r.errors && r.errors.length ? ` ${r.errors.length} failed.` : "");
     loadCloudSync();
+  };
+  $("pp_cloud_pull_btn").onclick = async () => {
+    const btn = $("pp_cloud_pull_btn"), status = $("pp_cloud_status");
+    btn.disabled = true;
+    // Picks up events created independently on the cloud side (e.g. a
+    // nickname edited via passport.skoor.ee's web viewer) that never
+    // reach this device any other way -- see ovpf_cloud.pull_and_merge_passport.
+    const r = await api("/api/cloud/pull", { urn: viewingUrn });
+    btn.disabled = false;
+    if (r.error) { status.textContent = "Error: " + r.error; return; }
+    status.textContent = r.added
+      ? `Pulled ${r.added} new event(s) from the cloud.` +
+        (r.conflicts && r.conflicts.length ? ` ${r.conflicts.length} conflict(s) -- see console.` : "")
+      : "Already up to date with the cloud.";
+    if (r.conflicts && r.conflicts.length) console.warn("pull conflicts:", r.conflicts);
+    loadPassport();  // re-renders the timeline with the merged-in events;
+                      // already calls loadCloudSync() itself at its end
   };
 }
 

@@ -25,6 +25,7 @@ talking to the provider, see _bare_id().
 """
 import json
 import os
+import shutil
 import ssl
 import urllib.error
 import urllib.request
@@ -264,6 +265,71 @@ def pull_passport(passport_id):
     except Exception:
         pass
     return path
+
+
+def _fetch_export(passport_id):
+    url = PROVIDER_URL.rstrip("/") + f"/v1/passports/{passport_id}/export"
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", _USER_AGENT)
+    try:
+        with urllib.request.urlopen(req, timeout=10.0,
+                                    context=_SSL_CONTEXT) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise CloudError("no such passport on this provider")
+        raise CloudError(f"HTTP {e.code}")
+    except urllib.error.URLError as e:
+        raise CloudError(f"provider unreachable: {e.reason}")
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
+def pull_and_merge_passport(vin, urn=None):
+    """Fetch this passport's full remote event history and merge in any
+    events that only exist there -- the counterpart to push_passport, for
+    events created independently on the cloud side (e.g. a nickname edited
+    via the web viewer, which writes straight to the provider). Unlike
+    pull_passport() above (which only ever creates a brand-new local file,
+    and is a no-op the moment one exists -- deliberately, to never clobber
+    unpushed local edits), this always fetches and unions by event id
+    (ovpf_core.merge) on top of whatever's local, since the whole point is
+    picking up remote-only events on an *existing* history. Backs up the
+    local file first (same .pre-*-backup precedent as the manual duplicate-
+    passport merge) since this rewrites it in place, then re-seals the
+    combined chain. Returns {"added", "conflicts"}; conflicts (same event
+    id, different content -- shouldn't happen with real usage, ids are
+    minted once) are reported rather than silently resolved either way.
+    Raises CloudError if there's no local passport to merge into, the
+    provider has nothing for this id, or is unreachable."""
+    path = ovpf_producer.resolve_log_path(vin, urn)
+    local_events = ovpf_core.load(path)
+    if not local_events:
+        return {"added": 0, "conflicts": [],
+                "note": "no local passport for this VIN"}
+    passport_id = _bare_id(local_events[0]["vehicle"])
+    remote_events = _fetch_export(passport_id)
+    local_ids = {ev["id"] for ev in local_events}
+    new_events = [ev for ev in remote_events if ev["id"] not in local_ids]
+    # merge() (and its conflict detection) has to run even when there are
+    # no brand-new ids -- a remote copy of an *existing* event with
+    # different content is exactly the conflict case, and it wouldn't
+    # show up in new_events at all (same id, so it'd get silently missed
+    # by an early-return here rather than reported).
+    merged, conflicts = ovpf_core.merge(local_events, remote_events)
+    if not new_events:
+        return {"added": 0, "conflicts": conflicts}
+    sealed = ovpf_core.seal(merged)
+    shutil.copy2(path, path + ".pre-pull-backup")
+    with open(path, "w", encoding="utf-8") as f:
+        for ev in sealed:
+            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+    # New events came *from* the provider -- mark them synced immediately,
+    # same reasoning as pull_passport above, so push_passport doesn't try
+    # to re-upload them right back.
+    synced = _load_synced_ids(path)
+    synced.update(ev["id"] for ev in new_events)
+    _save_synced_ids(path, synced)
+    return {"added": len(new_events), "conflicts": conflicts}
 
 
 def _synced_path(log_path):
