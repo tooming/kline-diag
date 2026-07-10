@@ -840,6 +840,28 @@ def _current_vin():
     return ADAPTER.vin if ADAPTER else None
 
 
+def _current_operator():
+    """Signed-in cloud identity's email, to stamp onto locally created
+    events as producer.operator (see ovpf_producer._stamp_operator and
+    OVPF.md's spec field) -- distinct from producer.name/type, which
+    describe the tool/mechanism (opendiag, a Diagnostic read), not who was
+    actually at the keyboard. ovpf_producer.py can't check this itself
+    (ovpf_cloud imports ovpf_producer, not the other way around). None if
+    nobody's signed in -- the common, fully-anonymous case, and events
+    stay exactly as they were before this existed."""
+    try:
+        import ovpf_cloud
+        ws = ovpf_cloud.get_workshop_session()
+        if ws and ws.get("email"):
+            return ws["email"]
+        us = ovpf_cloud.get_user_session()
+        if us and us.get("email"):
+            return us["email"]
+    except Exception:
+        pass
+    return None
+
+
 def _passport_url(urn):
     """Public passport.skoor.ee URL for a passport urn, or None if unminted.
     Same $OVPF_BASE_URL convention as the QR code (see do_GET) -- shared here
@@ -1961,7 +1983,7 @@ class Handler(BaseHTTPRequestHandler):
                     ovpf_producer.record_vehicle_identified(ADAPTER.vin, {
                         "vin": ADAPTER.vin,
                         "engine": info.get("engine"),
-                        "dme": info.get("dme")})
+                        "dme": info.get("dme")}, operator=_current_operator())
                 except Exception:
                     pass
             self._json({"detected": info,
@@ -2024,7 +2046,8 @@ class Handler(BaseHTTPRequestHandler):
                 try:    # append an OVPF DiagnosticTroubleCodeRead event
                     ovpf_producer.record_faults(
                         ADAPTER.vin, addr,
-                        ADAPTER.modules.get(addr, f"0x{addr:02X}"), res)
+                        ADAPTER.modules.get(addr, f"0x{addr:02X}"), res,
+                        operator=_current_operator())
                 except Exception:
                     pass
                 self._json(res)
@@ -2055,7 +2078,8 @@ class Handler(BaseHTTPRequestHandler):
                         snapshot_faults(addr, result.get("write_result", {}))
                         try:    # append an OVPF DiagnosticTroubleCodeCleared
                             ovpf_producer.record_clear(
-                                ADAPTER.vin, addr, module_name)
+                                ADAPTER.vin, addr, module_name,
+                                operator=_current_operator())
                         except Exception:
                             pass
 
@@ -2208,7 +2232,7 @@ class Handler(BaseHTTPRequestHandler):
                             ovpf_producer.record_coding_change(
                                 ADAPTER.vin, addr, module_name,
                                 current_coding.hex(), new_coding.hex(),
-                                preset=preset_id)
+                                preset=preset_id, operator=_current_operator())
                         except Exception:
                             pass
 
@@ -2315,7 +2339,8 @@ class Handler(BaseHTTPRequestHandler):
                         try:    # append an OVPF EcuCodingChanged event
                             ovpf_producer.record_coding_change(
                                 ADAPTER.vin, addr, module_name,
-                                current_coding.hex(), new_coding.hex())
+                                current_coding.hex(), new_coding.hex(),
+                                operator=_current_operator())
                         except Exception:
                             pass
 
@@ -2432,7 +2457,7 @@ class Handler(BaseHTTPRequestHandler):
                             ovpf_producer.record_coding_change(
                                 ADAPTER.vin, addr, module_name,
                                 current_coding.hex(), old_coding.hex(),
-                                preset=f"restore:{operation_id}")
+                                preset=f"restore:{operation_id}", operator=_current_operator())
                         except Exception:
                             pass
 
@@ -2719,7 +2744,7 @@ class Handler(BaseHTTPRequestHandler):
                     odometer=b.get("odometer"),
                     odometer_unit=b.get("odometerUnit", "KMT"),
                     price=b.get("price"), currency=b.get("currency"),
-                    notes=b.get("notes"))
+                    notes=b.get("notes"), operator=_current_operator())
                 self._json(ev)
             elif self.path == "/api/passport/create":
                 # Mint a passport with no live connection -- anonymous-first:
@@ -2740,7 +2765,8 @@ class Handler(BaseHTTPRequestHandler):
                           if b.get(k)}
                 if not facts:
                     return self._json({"error": "at least one vehicle fact required"}, 400)
-                ev = ovpf_producer.record_vehicle_identified(_current_vin(), facts)
+                ev = ovpf_producer.record_vehicle_identified(
+                    _current_vin(), facts, operator=_current_operator())
                 self._json(ev or {"note": "unchanged -- same facts already recorded"})
             elif self.path == "/api/vehicle/name":
                 # Local-only nickname (see ovpf_producer.set_vehicle_name) --
@@ -2878,7 +2904,8 @@ class Handler(BaseHTTPRequestHandler):
                         duration_s=(curve.get("window", {}).get("t_end", 0)
                                    - curve.get("window", {}).get("t_start", 0)) or None,
                         num=curve.get("pull_num"),
-                        curve_ref=f"dyno_runs/{curve_id}.json")
+                        curve_ref=f"dyno_runs/{curve_id}.json",
+                        operator=_current_operator())
                 except Exception:
                     pass
                 self._json({"id": curve_id, "curveRef": f"dyno_runs/{curve_id}.json"})
@@ -2930,7 +2957,7 @@ class Handler(BaseHTTPRequestHandler):
                     vin, b["serviceType"], odometer=b.get("odometer"),
                     odometer_unit=b.get("odometerUnit", "KMT"),
                     price=b.get("price"), currency=b.get("currency"),
-                    notes=b.get("notes"))
+                    notes=b.get("notes"), operator=_current_operator())
                 self._json(ev)
             else:
                 self._json({"error": "not found"}, 404)

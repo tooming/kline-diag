@@ -36,6 +36,20 @@ PRODUCER = {"type": "Diagnostic", "name": "opendiag", "version": VERSION,
 MANUAL = {"type": "Manual", "name": "opendiag", "version": VERSION}
 
 
+def _stamp_operator(base, operator):
+    """`producer.name`/`type` describe the tool and the mechanism (opendiag,
+    a Diagnostic read) -- distinct from `producer.operator` (OVPF.md's
+    spec field), who was actually signed in and running it. Every record_*
+    function below takes an optional `operator` (the caller -- diag_ui.py,
+    which can see the current cloud session -- resolves it; this module
+    can't import ovpf_cloud itself, which already imports this one).
+    Never mutates PRODUCER/MANUAL in place -- those are shared module
+    globals, not per-call state."""
+    if not operator:
+        return base
+    return {**base, "operator": operator}
+
+
 # --- log location ----------------------------------------------------------
 
 def _passports_dir():
@@ -161,7 +175,7 @@ def ensure_passport(vin):
 
 # --- mappers: diagnostic results -> events ---------------------------------
 
-def record_faults(vin, addr, module_name, faults_result):
+def record_faults(vin, addr, module_name, faults_result, operator=None):
     """Append a `DiagnosticTroubleCodeRead` from an adapter faults() result.
     De-dupes: unchanged code set since the last read for this module -> skip."""
     if not faults_result or not faults_result.get("ok"):
@@ -180,19 +194,19 @@ def record_faults(vin, addr, module_name, faults_result):
             if prev_codes == sorted(c["code"] for c in codes):
                 return None
         return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "DiagnosticTroubleCodeRead", data, PRODUCER))
+            urn, "DiagnosticTroubleCodeRead", data, _stamp_operator(PRODUCER, operator)))
 
 
-def record_clear(vin, addr, module_name):
+def record_clear(vin, addr, module_name, operator=None):
     """Append a `DiagnosticTroubleCodeCleared` (module-wide, `["*"]`)."""
     path, urn = ensure_passport(vin)
     data = {"module": {"address": f"0x{addr:02X}", "name": module_name},
             "codesCleared": ["*"]}
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "DiagnosticTroubleCodeCleared", data, PRODUCER))
+        urn, "DiagnosticTroubleCodeCleared", data, _stamp_operator(PRODUCER, operator)))
 
 
-def record_coding_change(vin, addr, module_name, before, after, preset=None):
+def record_coding_change(vin, addr, module_name, before, after, preset=None, operator=None):
     """Append an `EcuCodingChanged` (transaction-layer coding write)."""
     path, urn = ensure_passport(vin)
     data = {"module": {"address": f"0x{addr:02X}", "name": module_name},
@@ -200,10 +214,10 @@ def record_coding_change(vin, addr, module_name, before, after, preset=None):
     if preset:
         data["preset"] = preset
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "EcuCodingChanged", data, PRODUCER))
+        urn, "EcuCodingChanged", data, _stamp_operator(PRODUCER, operator)))
 
 
-def record_vehicle_identified(vin, facts):
+def record_vehicle_identified(vin, facts, operator=None):
     """Append a `VehicleIdentified` letting a passport 'learn' its car.
     De-duped: unchanged facts since the last identification -> skip."""
     facts = {k: v for k, v in (facts or {}).items() if v}
@@ -216,21 +230,21 @@ def record_vehicle_identified(vin, facts):
         if prev and prev.get("data", {}).get("vehicle", {}) == vehicle:
             return None
         return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "VehicleIdentified", {"vehicle": vehicle}, PRODUCER))
+            urn, "VehicleIdentified", {"vehicle": vehicle}, _stamp_operator(PRODUCER, operator)))
 
 
-def record_odometer(vin, value, unit="KMT", source="obd"):
+def record_odometer(vin, value, unit="KMT", source="obd", operator=None):
     """Append an `OdometerReading`."""
     if value is None:
         return None
     path, urn = ensure_passport(vin)
     data = {"value": value, "unit": unit, "source": source}
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "OdometerReading", data, PRODUCER))
+        urn, "OdometerReading", data, _stamp_operator(PRODUCER, operator)))
 
 
 def record_service(vin, service_type, odometer=None, odometer_unit="KMT",
-                    price=None, currency=None, notes=None):
+                    price=None, currency=None, notes=None, operator=None):
     """Append a `ServicePerformed` -- a manual maintenance fact (oil
     change, part swap, etc.), producer type Manual, not Diagnostic: this
     didn't come off the ECU, a person is asserting it happened."""
@@ -243,10 +257,10 @@ def record_service(vin, service_type, odometer=None, odometer_unit="KMT",
     if notes:
         data["notes"] = notes
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "ServicePerformed", data, MANUAL))
+        urn, "ServicePerformed", data, _stamp_operator(MANUAL, operator)))
 
 
-def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
+def record_live_session(vin, channels, sample_rate=None, attachment_ref=None, operator=None):
     """Append a `LiveDataRecorded` summarising a logging session."""
     path, urn = ensure_passport(vin)
     data = {"channels": list(channels)}
@@ -255,10 +269,10 @@ def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
     if attachment_ref:
         data["attachmentRef"] = attachment_ref
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "LiveDataRecorded", data, PRODUCER))
+        urn, "LiveDataRecorded", data, _stamp_operator(PRODUCER, operator)))
 
 
-def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None):
+def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None, operator=None):
     """Append a `DynoRun` -- peak power/torque from a detected WOT pull,
     producer type Diagnostic since these numbers came straight off the
     ECU's live channels, not a person's claim. `peaks` is whatever numeric
@@ -298,7 +312,7 @@ def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None):
     if curve_ref:
         data["curveRef"] = curve_ref
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "DynoRun", data, PRODUCER))
+        urn, "DynoRun", data, _stamp_operator(PRODUCER, operator)))
 
 
 def passport_state(vin):

@@ -298,6 +298,11 @@ def reduce(events):
         state["timeline"].append({
             "at": ev.get("occurredAt"), "type": t,
             "producer": p.get("name"),
+            # Who was actually signed in and running the tool, distinct
+            # from producer.name/type (the tool + mechanism, e.g. opendiag
+            # + a Diagnostic ECU read) -- optional spec field (OVPF.md),
+            # None for the common fully-anonymous case.
+            "operator": p.get("operator"),
             # Domain-verified provenance (see docs/TRUST.md) -- stamped by
             # a provider onto the event at write time, never client-
             # asserted (see ovp-provider-aws/src/app.py's append_event).
