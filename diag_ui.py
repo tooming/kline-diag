@@ -200,12 +200,14 @@ BRAKE_THERMAL_EFFICIENCY = 0.30  # typical NA gasoline engine at WOT;
                                   # general literature range is ~25-30% for
                                   # conventional (non-Atkinson/non-high-CR)
                                   # engines, confirmed via web search.
-# Efficiency is the dominant unknown (AFR and LHV vary far less between
-# engines/fuel batches) -- a +-3 percentage point band around the 30%
-# central estimate (27-33%, still within the typical NA range above) is a
-# fixed +-10% relative uncertainty on every estimate below, surfaced
-# alongside the number rather than presented as more precise than it is.
-POWER_ESTIMATE_UNCERTAINTY_PCT = 0.10
+# Deliberately NOT surfaced as a "+-X%" figure: an earlier version of this
+# comment did that by varying BRAKE_THERMAL_EFFICIENCY alone (+-3pp ->
+# +-10%), which implies a rigorous confidence interval that doesn't exist --
+# AFR, LHV, MAF sensor accuracy, and sampling all carry their own unstated
+# uncertainty too. Instead, every displayed estimate states its exact inputs
+# (AFR/BTE/LHV) so it's transparent and exactly reproducible, and so a
+# future refinement to any one constant can be understood against what
+# produced the old numbers. See ui.html's setDynoCurrent().
 # If a car's estimate consistently reads high/low against its known-healthy
 # factory rating, that's a signal the physics model (or these defaults) has
 # a systematic bias worth investigating -- not something to paper over with

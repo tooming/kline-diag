@@ -2493,10 +2493,11 @@ async function loadPulls() {
 const GASOLINE_LHV_KJ_PER_G = 44.0;
 const WOT_AFR = 12.6;
 const BRAKE_THERMAL_EFFICIENCY = 0.30;
-// Efficiency is the dominant unknown -- a +-3pp band around the 30%
-// central estimate (27-33%) is a fixed +-10% relative uncertainty,
-// mirrors diag_ui.py's POWER_ESTIMATE_UNCERTAINTY_PCT.
-const POWER_ESTIMATE_UNCERTAINTY_PCT = 0.10;
+// Deliberately not shown as a "+-X%" figure -- see diag_ui.py's comment
+// above BRAKE_THERMAL_EFFICIENCY for why a single-parameter sensitivity
+// band would misrepresent this as a real confidence interval. The exact
+// inputs (AFR/BTE/LHV) are shown alongside every estimate instead (see
+// setDynoCurrent()) so it's transparent and reproducible.
 function estimatePowerTorque(maf_gps, rpm) {
   if (!maf_gps) return [null, null];
   const fuel_g_s = maf_gps / WOT_AFR;
@@ -3013,12 +3014,15 @@ function setDynoCurrent(curve, label) {
       c.peak_load != null ? ppChip("Peak load", `${c.peak_load}${c.load_unit || ""}`) : "",
       c.iat_mean_c != null ? ppChip("IAT", `${c.iat_mean_c}°C`) : "",
     ].join("");
-    const pwUnc = (pw * POWER_ESTIMATE_UNCERTAINTY_PCT).toFixed(1);
-    const tqUnc = (tq * POWER_ESTIMATE_UNCERTAINTY_PCT).toFixed(1);
-    $("dyno_current").innerHTML = `<strong>${wsEsc(label)}</strong> — ${pw.toFixed(1)} ± ${pwUnc} kW @ ${pk.power_kw_rpm} rpm / ${tq.toFixed(1)} ± ${tqUnc} Nm @ ${pk.torque_nm_rpm} rpm` +
+    $("dyno_current").innerHTML = `<strong>${wsEsc(label)}</strong> — ${pw.toFixed(1)} kW @ ${pk.power_kw_rpm} rpm / ${tq.toFixed(1)} Nm @ ${pk.torque_nm_rpm} rpm` +
       (curve.gear_shift_detected ? ` <span class="muted">(gear shift detected, showing ${curve.bins[0].rpm}–${curve.bins[curve.bins.length-1].rpm} rpm only)</span>` : "") +
       (curve.correction && !curve.correction.valid_range ? ` <span style="color:var(--warn)">correction factor out of validated range (${curve.correction.cf.toFixed(3)}) — treat corrected values with caution</span>` : "") +
-      `<div class="muted" style="font-size:11px;margin-top:2px">± reflects uncertainty in the assumed brake thermal efficiency (27–33%), not measurement noise -- the underlying airflow reading is exact.</div>` +
+      // Exact inputs, not a +-X% figure -- a single-parameter sensitivity
+      // band (varying BTE alone) would imply a rigorous confidence
+      // interval that doesn't exist (AFR, LHV, and MAF accuracy all carry
+      // their own unstated uncertainty too). This is fully reproducible
+      // instead: change the assumptions, get a different number, know why.
+      `<div class="muted" style="font-size:11px;margin-top:2px">physics estimate — AFR ${WOT_AFR}:1, brake thermal efficiency ${(BRAKE_THERMAL_EFFICIENCY*100).toFixed(0)}%, gasoline LHV ${GASOLINE_LHV_KJ_PER_G} kJ/g. Not a real dyno.</div>` +
       (condChips ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${condChips}</div>` : "");
     dynoCurrent = { label, color: DYNO_COLORS[0], curve };
   }
