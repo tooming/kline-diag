@@ -244,14 +244,6 @@
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">ECUS (<span id="ecucount">0</span>)</div>
         <div id="eculist" class="muted">Scan modules to populate.</div>
       </div>
-      <div id="quickactions">
-        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">ACTIONS</div>
-        <div class="row" style="gap:6px">
-          <button id="dashscan" style="font-size:12px">🔍 Scan</button>
-          <button id="dashfaults" style="font-size:12px">⚠️ Faults</button>
-          <button id="dashlive" style="font-size:12px">📊 Live</button>
-        </div>
-      </div>
     </section>
     <section data-tab="passport" id="passportsec">
       <h2>Vehicle Passport</h2>
@@ -3245,19 +3237,6 @@ $("readall").onclick = async () => {
 $("connect").onclick = async () => {
   $("conn").textContent = "connecting…";
   setState(await api("/api/connect", { protocol: $("protosel").value }));
-};
-
-// Dashboard quick actions
-$("dashscan").onclick = async () => {
-  $("scan").click();  // Trigger main scan button
-};
-
-$("dashfaults").onclick = async () => {
-  $("readall").click();  // Trigger read all faults button
-};
-
-$("dashlive").onclick = async () => {
-  $("livebtn").click();  // Trigger live data button
 };
 
 // Snapshot create button
