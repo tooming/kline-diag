@@ -1325,6 +1325,16 @@ def record_start():
         f = open(path, "w", buffering=1)
         ids = [c["id"] for c in (ADAPTER.live_channels if ADAPTER else [])
                if c["id"] not in INFERRED_CHANNELS]
+        # Tags the recording with whichever car is connected right now, so
+        # a Dyno curve generated later from a Replay selection of this file
+        # (generateDynoFromSelection) can attribute it correctly instead of
+        # falling back to whatever's connected *at generation time* (wrong
+        # car if a different one's since been plugged in) or "unknown" (no
+        # connection at all) -- the exact gap that let a real E39 dyno
+        # session end up orphaned under an "unknown" passport earlier this
+        # project. A plain leading comment line, not a new column -- see
+        # ui.html's parseCSV for the matching skip-and-parse.
+        f.write(f"# vin: {ADAPTER.vin if ADAPTER else ''}\n")
         # Event columns: event, pull_id, event_data for extensible event system
         f.write("time,epoch,event,pull_id,event_data," + ",".join(ids) + "\n")
         RECORDER.update(on=True, path=path, file=f, count=0, ids=ids)

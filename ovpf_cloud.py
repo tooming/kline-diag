@@ -307,28 +307,42 @@ def pull_and_merge_passport(vin, urn=None):
         return {"added": 0, "conflicts": [],
                 "note": "no local passport for this VIN"}
     passport_id = _bare_id(local_events[0]["vehicle"])
+    # Fetch before taking the lock -- a slow network round trip has no
+    # business holding up a concurrent local writer (e.g. a live pull
+    # finishing and appending its own DynoRun event).
     remote_events = _fetch_export(passport_id)
-    local_ids = {ev["id"] for ev in local_events}
-    new_events = [ev for ev in remote_events if ev["id"] not in local_ids]
-    # merge() (and its conflict detection) has to run even when there are
-    # no brand-new ids -- a remote copy of an *existing* event with
-    # different content is exactly the conflict case, and it wouldn't
-    # show up in new_events at all (same id, so it'd get silently missed
-    # by an early-return here rather than reported).
-    merged, conflicts = ovpf_core.merge(local_events, remote_events)
-    if not new_events:
-        return {"added": 0, "conflicts": conflicts}
-    sealed = ovpf_core.seal(merged)
-    shutil.copy2(path, path + ".pre-pull-backup")
-    with open(path, "w", encoding="utf-8") as f:
-        for ev in sealed:
-            f.write(json.dumps(ev, ensure_ascii=False) + "\n")
-    # New events came *from* the provider -- mark them synced immediately,
-    # same reasoning as pull_passport above, so push_passport doesn't try
-    # to re-upload them right back.
-    synced = _load_synced_ids(path)
-    synced.update(ev["id"] for ev in new_events)
-    _save_synced_ids(path, synced)
+
+    # Everything from here reads and rewrites the file, so it needs the
+    # same lock append() takes (ovpf_core._file_lock) -- this used to do a
+    # plain read-modify-write with no locking at all, which could silently
+    # drop a concurrent append landing between the read above and the
+    # write below (this device's local_events snapshot could already be
+    # stale by the time this runs). Local state is re-read fresh inside
+    # the lock so the merge decision is made against what's actually on
+    # disk right now, not the possibly-stale copy read a moment ago.
+    with ovpf_core._file_lock(path):
+        local_events = ovpf_core.load(path)
+        local_ids = {ev["id"] for ev in local_events}
+        new_events = [ev for ev in remote_events if ev["id"] not in local_ids]
+        # merge() (and its conflict detection) has to run even when there
+        # are no brand-new ids -- a remote copy of an *existing* event
+        # with different content is exactly the conflict case, and it
+        # wouldn't show up in new_events at all (same id, so it'd get
+        # silently missed by an early-return here rather than reported).
+        merged, conflicts = ovpf_core.merge(local_events, remote_events)
+        if not new_events:
+            return {"added": 0, "conflicts": conflicts}
+        sealed = ovpf_core.seal(merged)
+        shutil.copy2(path, path + ".pre-pull-backup")
+        with open(path, "w", encoding="utf-8") as f:
+            for ev in sealed:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        # New events came *from* the provider -- mark them synced
+        # immediately, same reasoning as pull_passport above, so
+        # push_passport doesn't try to re-upload them right back.
+        synced = _load_synced_ids(path)
+        synced.update(ev["id"] for ev in new_events)
+        _save_synced_ids(path, synced)
     return {"added": len(new_events), "conflicts": conflicts}
 
 

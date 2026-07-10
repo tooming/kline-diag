@@ -1321,7 +1321,17 @@ function showDiff(oldData, newData, leftTitle, rightTitle, metadata = null) {
 // === Replay Mode ===
 
 function parseCSV(text) {
-  const lines = text.trim().split('\n');
+  const allLines = text.trim().split('\n');
+  // Leading "# vin: ..." comment line (see diag_ui.py's record_start) --
+  // tags which car this recording is actually from, independent of
+  // whatever's connected at Replay time. Older recordings predate this
+  // and just fall through with vin=null, same as before this existed.
+  let vin = null;
+  const lines = allLines[0] && allLines[0].startsWith('#') ? allLines.slice(1) : allLines;
+  if (allLines[0] && allLines[0].startsWith('#')) {
+    const m = allLines[0].match(/vin:\s*(\S*)/);
+    if (m && m[1]) vin = m[1];
+  }
   if (lines.length < 2) return null;
 
   const header = lines[0].split(',');
@@ -1362,7 +1372,7 @@ function parseCSV(text) {
     rows.push(row);
   }
 
-  return { header: params, rows };
+  return { header: params, rows, vin };
 }
 
 function loadReplayFile(file) {
@@ -3029,8 +3039,17 @@ function setDynoCurrent(curve, label) {
   updateDynoChart();
 }
 
-async function saveDynoRun(curve, source) {
-  const r = await api("/api/dyno/save", { curve: { ...curve, source } });
+async function saveDynoRun(curve, source, vin) {
+  // vin explicit only for a Replay-sourced curve (see
+  // generateDynoFromSelection) -- otherwise the server falls back to
+  // whatever's connected right now (_current_vin()), correct for a live
+  // pull but wrong for a replayed recording, which could be from a
+  // different car than whatever's plugged in at generation time (or
+  // nothing at all -- both silently landed in the wrong/"unknown"
+  // passport before this existed).
+  const body = { curve: { ...curve, source } };
+  if (vin) body.vin = vin;
+  const r = await api("/api/dyno/save", body);
   if (r && !r.error) loadDynoRuns();
   return r;
 }
@@ -3120,7 +3139,7 @@ async function generateDynoFromSelection(pull) {
   // instead of the generic "Manual selection" in the Past Runs list.
   if (pull) curve.pull_num = pull.id;
   setDynoCurrent(curve, pull ? `Pull #${pull.id}` : "Replay selection");
-  await saveDynoRun(curve, pull ? "replay_pull" : "replay_selection");
+  await saveDynoRun(curve, pull ? "replay_pull" : "replay_selection", replayData.vin);
   return true;
 }
 $("gendyno_btn")?.addEventListener("click", () => generateDynoFromSelection());
