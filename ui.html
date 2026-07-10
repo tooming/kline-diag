@@ -4077,8 +4077,16 @@ async function loadPassport() {
   const banner = $("pp_viewing_banner");
   // Only a genuine mismatch counts as "browsing" -- if it happens to be the
   // connected car's own VIN, treat it like the normal connected view (full
-  // write access, no banner).
-  const isOther = viewingVin && viewingVin !== state.vin;
+  // write access, no banner). Requires state.connected: when nothing's
+  // connected at all, state.vin is null/undefined, and viewingVin !==
+  // null is true for *any* garage vehicle -- including the one that was
+  // just connected a moment ago (e.g. a brief adapter reconnect blip, see
+  // CLAUDE.md's "Adapter failure modes"). That's not "a different car is
+  // connected", it's "nothing is", and calling it the former is actively
+  // misleading -- confirmed live: viewing the E39's own passport while
+  // it's genuinely the only thing ever connected still showed "not the
+  // connected car", pointing back at itself.
+  const isOther = state.connected && viewingVin && viewingVin !== state.vin;
   if (isOther) {
     banner.style.display = "";
     banner.innerHTML = `Viewing <b>${wsEsc(viewingVin)}</b> (not the connected car) — read-only here.
