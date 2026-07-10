@@ -15,7 +15,7 @@ reverse-derived from the deployed page):
     verified with the provider -- this client can *check*
     verification status but can't add a DNS record for you.
 
-Sessions live in cloud_session.json (gitignored, like workshop.json) --
+Sessions live in cloud_session.json (gitignored, like vehicle_names.json) --
 tokens never committed, never synced anywhere else.
 
 The provider's passport id is a bare UUID (its viewer mints one via
@@ -335,14 +335,16 @@ def push_passport(vin, urn=None):
         raise CloudError("not signed in -- sign in (personal or workshop) "
                          "before pushing")
 
-    # Events can carry producer.type "Workshop" purely from the local
-    # self-asserted identity (ovpf_producer.set_workshop) -- no DNS/OTP
-    # behind it. Uploading that claim as-is would put an unverified
-    # "Workshop: <name> @ <domain>" stamp on a cloud passport, which reads
-    # as a real workshop to anyone viewing it. Only push it if there's a
-    # currently signed-in cloud workshop session (real OTP-verified against
-    # that DNS-verified domain) backing the same domain -- otherwise refuse
-    # the whole batch rather than silently uploading an unverifiable claim.
+    # A producer.type "Workshop" event has no code path that creates it
+    # locally anymore (the self-asserted local Workshop identity was
+    # removed as confusing UX), but a hand-edited or pre-removal
+    # .ovpf.ndjson file could still carry one. Uploading that claim as-is
+    # would put an unverified "Workshop: <name> @ <domain>" stamp on a
+    # cloud passport, which reads as a real workshop to anyone viewing it.
+    # Only push it if there's a currently signed-in cloud workshop session
+    # (real OTP-verified against that DNS-verified domain) backing the same
+    # domain -- otherwise refuse the whole batch rather than silently
+    # uploading an unverifiable claim.
     ws_session = get_workshop_session()
     for ev in to_send:
         producer = ev.get("producer", {})

@@ -312,24 +312,20 @@
     </section>
     <section data-tab="workshop" id="workshopsec">
       <h2>Workshop</h2>
+      <h3 style="margin:0 0 6px;font-size:13px;color:var(--dim)">Cloud workshop sign-in</h3>
       <div class="muted" style="font-size:11px;margin-bottom:10px">
-        A self-asserted local identity -- no account, no cloud, no DNS
-        verification. Once set, every event you log (here or on the
-        Passport tab) is attributed to this workshop instead of left
-        anonymous.
-      </div>
-      <div id="ws_profile_box"></div>
-      <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Cloud workshop sign-in</h3>
-      <div class="muted" style="font-size:11px;margin-bottom:10px">
-        Separate from the local identity above: proves (via a one-time
-        email code) that you're currently signed in as someone at a
-        DNS-verified workshop domain on passport.skoor.ee. Needed to push
-        events attributed to that workshop -- being signed in with just
-        your personal email isn't enough for those specifically.
+        Proves (via a one-time email code) that you're currently signed in
+        as someone at a DNS-verified workshop domain on passport.skoor.ee.
+        Needed to push events attributed to that workshop -- being signed
+        in with just your personal email isn't enough for those
+        specifically.
       </div>
       <div id="ws_cloud_box"></div>
       <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Garage — vehicles worked on</h3>
       <div id="ws_garage" class="muted">Loading…</div>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:11px" class="muted">
+        <input type="checkbox" id="ws_show_hidden"> Show removed vehicles
+      </label>
     </section>
     <section data-tab="analysis" id="snapshotsec">
       <h2>Snapshots</h2>
@@ -493,7 +489,13 @@
     </section>
     <section data-tab="analysis" id="replaysec">
       <h2>Replay Recordings</h2>
-      <div class="row" style="margin-bottom:8px">
+      <div id="replaydir" class="muted" style="font-size:11px;margin-bottom:8px">Recordings save to: …</div>
+      <div class="row" style="gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center">
+        <select id="replaypicker" style="flex:1;min-width:200px;font-size:12px;padding:4px"><option value="">Loading recordings…</option></select>
+        <button id="replayloadpicked_btn" style="font-size:12px">Load</button>
+      </div>
+      <div class="row" style="margin-bottom:8px;align-items:center;gap:6px">
+        <span class="muted" style="font-size:11px">or from a file elsewhere:</span>
         <input type="file" id="replayfile" accept=".csv" style="font-size:12px;color:var(--fg)">
       </div>
       <div id="replaystatus" class="muted">Load a CSV recording to replay.</div>
@@ -517,7 +519,32 @@
         </div>
         <div id="replaytime" style="font-size:11px;color:var(--dim)"></div>
       </div>
+      <div class="muted" style="font-size:11px;margin-top:8px">
+        Drag on a chart to select a time range (Grafana-style) — zoom in, or generate a dyno graph from exactly that window.
+      </div>
+      <div id="zoomtoolbar" style="display:none;margin-top:6px;gap:6px;flex-wrap:wrap" class="row">
+        <span id="zoomselinfo" class="muted" style="font-size:11px"></span>
+        <button id="zoomtosel_btn" style="font-size:11px">🔍 Zoom to selection</button>
+        <button id="gendyno_btn" style="font-size:11px">🏁 Generate dyno from selection</button>
+      </div>
+      <button id="resetzoom_btn" style="display:none;font-size:11px;margin-top:6px">↺ Reset zoom</button>
       <div id="replayevents" style="margin-top:10px"></div>
+    </section>
+    <section data-tab="analysis" id="dynosec">
+      <h2>Virtual Dyno</h2>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">
+        Estimated power/torque vs RPM, MAF-based -- see the live dashboard's
+        "Est. Crank Power/Torque" tiles for the same caveats. Generated
+        automatically from a detected pull, or manually from a Replay
+        selection.
+      </div>
+      <div id="dyno_current" class="muted">No curve yet -- do a pull live, or generate one from a Replay selection.</div>
+      <div style="position:relative;width:100%;height:280px;margin-top:10px">
+        <canvas id="dynochart"></canvas>
+      </div>
+      <div id="dynolegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:12px"></div>
+      <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Past runs — overlay for comparison</h3>
+      <div id="dynoruns" class="muted">Connect to a vehicle (or browse one from the Workshop garage) to see past runs.</div>
     </section>
     <section data-tab="diagnostics" id="codingsec">
       <h2>Coding</h2>
@@ -1329,8 +1356,15 @@ function parseCSV(text) {
 
 function loadReplayFile(file) {
   const reader = new FileReader();
-  reader.onload = (e) => {
-    const parsed = parseCSV(e.target.result);
+  reader.onload = (e) => loadReplayText(e.target.result);
+  reader.readAsText(file);
+}
+
+// Shared by both load paths: an OS file-picker (loadReplayFile, above) and
+// the server-backed picker (loadReplayFromServer, below) -- same DATA dir
+// the recorder writes drive_log_*.csv into (see /api/recordings/dir).
+function loadReplayText(text) {
+    const parsed = parseCSV(text);
     if (!parsed) {
       $('replaystatus').textContent = 'Failed to parse CSV file';
       return;
@@ -1362,13 +1396,57 @@ function loadReplayFile(file) {
     // Show event list
     displayReplayEvents(events);
 
+    // Build a real, static, full-extent timeline from the recording's own
+    // epoch values -- NOT fed through pushSample()/hist[]'s usual 120s
+    // rolling eviction (that's for live wall-clock samples; a loaded
+    // recording already has its own real timestamps and can be far longer
+    // than 120s). Play/scrub just moves the playhead marker over this
+    // already-complete chart instead of re-driving fake live samples.
+    for (const k of Object.keys(hist)) delete hist[k];
+    for (const id of parsed.header) hist[id] = [];
+    for (const row of parsed.rows) {
+      for (const id of parsed.header) {
+        const v = Number(row.values[id]);
+        if (Number.isFinite(v)) hist[id].push({ t: row.epoch, v });
+      }
+    }
+    viewDomain = { t0: parsed.rows[0].epoch, t1: parsed.rows[parsed.rows.length - 1].epoch };
+    selRange = null;
+    playheadT = parsed.rows[0].epoch;
+    updateZoomToolbar();
+
     // Initialize charts for replay
     charted = parsed.header.slice(0, 6); // Chart first 6 params by default
     buildTiles();
     buildCharts();
-  };
-  reader.readAsText(file);
 }
+
+async function loadReplayFromServer(name) {
+  if (!name) return;
+  $('replaystatus').textContent = 'Loading ' + name + '…';
+  const r = await api('/api/recordings/' + encodeURIComponent(name));
+  if (r.error) { $('replaystatus').textContent = 'Error: ' + r.error; return; }
+  loadReplayText(r.content);
+}
+
+async function loadRecordingsPicker() {
+  const sel = $('replaypicker');
+  if (!sel) return;
+  try {
+    const [dir, recs] = await Promise.all([
+      api('/api/recordings/dir'),
+      api('/api/recordings'),
+    ]);
+    if (dir && dir.path) $('replaydir').textContent = 'Recordings save to: ' + dir.path;
+    sel.innerHTML = '';
+    if (!recs || !recs.length) {
+      sel.innerHTML = '<option value="">No recordings found</option>';
+      return;
+    }
+    for (const r of recs) sel.add(new Option(`${r.name} (${r.rows} rows)`, r.name));
+  } catch (e) { /* recordings picker optional */ }
+}
+$('replayloadpicked_btn')?.addEventListener('click', () => loadReplayFromServer($('replaypicker').value));
 
 function displayReplayEvents(events) {
   const box = $('replayevents');
@@ -1404,50 +1482,14 @@ function displayReplayEvents(events) {
 }
 
 function jumpToEvent(evt) {
-  // Find index of this event
+  // The full recording is already loaded statically into hist[] (see
+  // loadReplayFile) -- jumping to an event just moves the playhead and
+  // scrub position, nothing to rebuild.
   const idx = replayData.rows.findIndex(r => r.epoch === evt.epoch);
   if (idx >= 0) {
     replayIndex = idx;
-    rebuildChartHistoryToIndex(idx);
     updateReplayFrame();
   }
-}
-
-function rebuildChartHistoryToIndex(targetIdx) {
-  // Properly clear all chart data
-  for (const cv of document.querySelectorAll("canvas")) {
-    if (cv.__pts) {
-      cv.__pts.length = 0; // Clear array in place
-    }
-  }
-
-  // Clear sample times
-  sampleTimes.length = 0;
-
-  // Rebuild history: add last 200 samples leading up to target point
-  const startIdx = Math.max(0, targetIdx - 200);
-  for (let i = startIdx; i <= targetIdx; i++) {
-    const row = replayData.rows[i];
-    const t = row.epoch;
-
-    // Add to sample times
-    sampleTimes.push(t);
-    if (sampleTimes.length > 200) sampleTimes.shift();
-
-    // Push to each channel's chart
-    for (const ch of state.channels) {
-      const cv = document.querySelector(`canvas[data-id="${ch.id}"]`);
-      if (!cv || !cv.__pts) continue;
-
-      const val = row.values[ch.id];
-      if (val !== undefined) {
-        cv.__pts.push({ t, v: val });
-        if (cv.__pts.length > 200) cv.__pts.shift();
-      }
-    }
-  }
-
-  redraw();
 }
 
 function playReplay() {
@@ -1499,18 +1541,18 @@ function updateReplayFrame() {
   const currentTime = row.epoch - replayData.rows[0].epoch;
   $('replaytime').textContent = `${row.time} (${currentTime.toFixed(1)}s / ${totalTime.toFixed(1)}s)`;
 
-  // Push sample to charts
-  pushSample(row.values);
+  // Move the playhead over the already-fully-loaded static chart (see
+  // loadReplayFile) instead of re-driving fake live samples through
+  // pushSample()/hist[]'s 120s eviction.
+  playheadT = row.epoch;
   redraw();
 
   // Update tiles
   for (const ch of state.channels) {
-    const tile = $("tile" + ch.id);
+    const tile = $("tile_" + ch.id);
     if (!tile) continue;
     const val = row.values[ch.id];
-    if (val !== undefined) {
-      tile.querySelector(".val").textContent = val.toFixed(ch.id.startsWith('P') ? 0 : 1);
-    }
+    if (val !== undefined) tile.textContent = val.toFixed(ch.id.startsWith('P') ? 0 : 1);
   }
 
   // Show event if present
@@ -2023,6 +2065,19 @@ function pushSample(values) {
 // every chart so moving the mouse over one graph shows the same instant
 // (vertical line + value) on all the others.
 let hoverT = null;
+// viewDomain: null = live rolling-120s window (today's behavior). Set to
+// {t0,t1} to pin every chart to a fixed range instead -- both "zoomed into
+// a brush-selection" and "Replay's full-recording static view" (see
+// loadReplayFile) are just this with different extents.
+let viewDomain = null;
+// playheadT: Replay's scrub position, drawn as a distinct vertical marker
+// (not the hover crosshair) over the now-static full-recording chart.
+let playheadT = null;
+// Brush-select state -- selRange is shared across every chart the same way
+// hoverT is, so dragging on one chart shows the same selection on all of
+// them.
+let isMouseDown = false, dragAnchorX = null, selecting = false, selRange = null;
+
 function nearestPoint(pts, t) {
   let lo = 0, hi = pts.length - 1;
   if (t <= pts[0].t) return pts[0];
@@ -2034,49 +2089,121 @@ function nearestPoint(pts, t) {
   return (t - pts[lo].t) < (pts[hi].t - t) ? pts[lo] : pts[hi];
 }
 
+// Single source of truth for a chart's time domain -- drawChart, the hover
+// handler, and the brush-select handler all used to compute t0=t1-120
+// independently (three copies of the same formula); this is the one place
+// now.
+function getDomain(pts, vd) {
+  if (vd) return vd;
+  const t1 = pts[pts.length - 1].t;
+  return { t0: t1 - 120, t1 };
+}
+
 function redraw() {
   for (const id of charted) {
     const cv = $("chart_" + id);
-    if (cv) drawChart(cv, hist[id] || [], id);
+    if (cv) drawChart(cv, hist[id] || [], id, viewDomain);
   }
 }
 
-function drawChart(cv, pts, id) {
+// HH:MM:SS for most views; adds tenths once a chart is zoomed tight enough
+// that whole seconds would repeat across every tick.
+function formatTickTime(t, spanSec) {
+  const d = new Date(t * 1000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  if (spanSec < 20) {
+    return `${hh}:${mm}:${ss}.${Math.floor(d.getMilliseconds() / 100)}`;
+  }
+  return `${hh}:${mm}:${ss}`;
+}
+
+function drawChart(cv, pts, id, vd) {
   const ctx = cv.getContext("2d");
   const W = cv.width = cv.clientWidth * devicePixelRatio;
   const H = cv.height = 130 * devicePixelRatio;
   ctx.clearRect(0, 0, W, H);
   if (pts.length < 2) return;
-  const t1 = pts[pts.length - 1].t, t0 = t1 - 120;
+  // Bottom gutter reserved for the x-axis time ticks below -- without it,
+  // the lowest y-gridline's value label and the time labels both want the
+  // same pixels at the very bottom edge.
+  const axisH = 12 * devicePixelRatio;
+  const plotH = H - axisH;
+  const { t0, t1 } = getDomain(pts, vd);
+  const span = t1 - t0 || 1;
   let lo = Infinity, hi = -Infinity;
-  for (const p of pts) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; }
+  for (const p of pts) {
+    if (p.t < t0 || p.t > t1) continue;
+    if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v;
+  }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
   if (hi - lo < 1e-9) { hi += 1; lo -= 1; }
   const pad = (hi - lo) * 0.15; lo -= pad; hi += pad;
   ctx.strokeStyle = "#313945"; ctx.lineWidth = 1;
   ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
   ctx.fillStyle = "#8b97a5";
   for (let i = 0; i <= 3; i++) {
-    const y = H * i / 3;
+    const y = plotH * i / 3;
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
     const val = hi - (hi - lo) * i / 3;
+    // The bottom gridline's label sits above its line instead of below --
+    // below would land it in the reserved x-axis strip.
+    const ly = i === 3 ? y - 4 * devicePixelRatio : y + 12 * devicePixelRatio;
     ctx.fillText(val.toFixed(Math.abs(hi - lo) < 20 ? 1 : 0),
-                 6 * devicePixelRatio, y + 12 * devicePixelRatio);
+                 6 * devicePixelRatio, ly);
+  }
+  // X-axis time ticks, same bottom-edge convention as drawDynoChart's RPM
+  // axis: 4 evenly spaced labels, clamped off the extreme edges so text
+  // doesn't clip past the canvas.
+  ctx.fillStyle = "#8b97a5";
+  ctx.font = `${9 * devicePixelRatio}px ui-monospace`;
+  for (let i = 0; i <= 3; i++) {
+    const t = t0 + span * i / 3;
+    const text = formatTickTime(t, span);
+    const tw = ctx.measureText(text).width;
+    const x = Math.min(W - tw - 2 * devicePixelRatio,
+                        Math.max(2 * devicePixelRatio, W * i / 3 - tw / 2));
+    ctx.fillText(text, x, H - 2 * devicePixelRatio);
   }
   ctx.strokeStyle = "#4da3ff"; ctx.lineWidth = 2 * devicePixelRatio;
   ctx.beginPath();
+  let started = false;
   for (let i = 0; i < pts.length; i++) {
-    const x = (pts[i].t - t0) / 120 * W;
-    const y = H - (pts[i].v - lo) / (hi - lo) * H;
-    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    if (pts[i].t < t0 || pts[i].t > t1) continue;
+    const x = (pts[i].t - t0) / span * W;
+    const y = plotH - (pts[i].v - lo) / (hi - lo) * plotH;
+    started ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    started = true;
   }
   ctx.stroke();
+  // Selection rectangle -- same range drawn on every chart, Grafana-style.
+  // Skipped when selRange *is* the current view (auto-zoomed into it
+  // already, see the mouseup handler) -- a full-width tint over the whole
+  // visible chart would just be visual noise at that point.
+  if (selRange && selRange !== vd && selRange.t1 > t0 && selRange.t0 < t1) {
+    const sx0 = Math.max(0, (selRange.t0 - t0) / span * W);
+    const sx1 = Math.min(W, (selRange.t1 - t0) / span * W);
+    ctx.fillStyle = "rgba(77,163,255,0.15)";
+    ctx.fillRect(sx0, 0, sx1 - sx0, plotH);
+    ctx.strokeStyle = "rgba(77,163,255,0.5)"; ctx.lineWidth = 1 * devicePixelRatio;
+    ctx.beginPath(); ctx.moveTo(sx0, 0); ctx.lineTo(sx0, plotH);
+    ctx.moveTo(sx1, 0); ctx.lineTo(sx1, plotH); ctx.stroke();
+  }
+  // Playhead: Replay's scrub position -- distinct from the hover crosshair
+  // below (solid accent line, no value bubble).
+  if (playheadT != null && playheadT >= t0 && playheadT <= t1) {
+    const x = (playheadT - t0) / span * W;
+    ctx.strokeStyle = "#e6b800"; ctx.lineWidth = 2 * devicePixelRatio;
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, plotH); ctx.stroke();
+  }
   // Crosshair: same hovered instant drawn on every chart, Grafana-style.
   if (hoverT != null && hoverT >= t0 && hoverT <= t1) {
     const np = nearestPoint(pts, hoverT);
-    const x = (np.t - t0) / 120 * W;
-    const y = H - (np.v - lo) / (hi - lo) * H;
+    const x = (np.t - t0) / span * W;
+    const y = plotH - (np.v - lo) / (hi - lo) * plotH;
     ctx.strokeStyle = "#9aa4b2"; ctx.lineWidth = 1 * devicePixelRatio;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, plotH); ctx.stroke();
     ctx.fillStyle = "#4da3ff";
     ctx.beginPath(); ctx.arc(x, y, 3 * devicePixelRatio, 0, 2 * Math.PI);
     ctx.fill();
@@ -2096,18 +2223,82 @@ function drawChart(cv, pts, id) {
   }
 }
 
+function xToT(e, target) {
+  const id = target.id.replace("chart_", "");
+  const pts = hist[id] || [];
+  if (pts.length < 2) return null;
+  const rect = target.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  const { t0, t1 } = getDomain(pts, viewDomain);
+  return t0 + frac * (t1 - t0);
+}
+
+function updateZoomToolbar() {
+  const bar = $("zoomtoolbar");
+  if (!bar) return;
+  if (selRange) {
+    bar.style.display = "flex";
+    $("zoomselinfo").textContent = `${(selRange.t1 - selRange.t0).toFixed(1)}s selected`;
+  } else {
+    bar.style.display = "none";
+  }
+  const rz = $("resetzoom_btn");
+  if (rz) rz.style.display = viewDomain ? "" : "none";
+}
+
+$("charts").addEventListener("mousedown", e => {
+  if (e.target.tagName !== "CANVAS") return;
+  dragAnchorX = e.clientX;
+  isMouseDown = true;
+  selecting = false;
+});
 $("charts").addEventListener("mousemove", e => {
   if (e.target.tagName !== "CANVAS") return;
-  const id = e.target.id.replace("chart_", "");
-  const pts = hist[id] || [];
-  if (pts.length < 2) return;
-  const rect = e.target.getBoundingClientRect();
-  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-  const t1 = pts[pts.length - 1].t, t0 = t1 - 120;
-  hoverT = t0 + frac * (t1 - t0);
-  redraw();
+  if (isMouseDown) {
+    if (!selecting && Math.abs(e.clientX - dragAnchorX) > 5) selecting = true;
+    if (selecting) {
+      const tA = xToT({ clientX: dragAnchorX }, e.target);
+      const tB = xToT(e, e.target);
+      if (tA != null && tB != null) {
+        selRange = { t0: Math.min(tA, tB), t1: Math.max(tA, tB) };
+        updateZoomToolbar();
+        redraw();
+      }
+      return;
+    }
+  }
+  const t = xToT(e, e.target);
+  if (t != null) { hoverT = t; redraw(); }
+});
+$("charts").addEventListener("mouseup", () => {
+  // Grafana-style: a completed drag zooms immediately, no separate
+  // "confirm zoom" click needed. viewDomain takes the *same* selRange
+  // object (not a copy) so drawChart's selection-highlight can tell "this
+  // rect is exactly what's already on screen" and skip drawing a redundant
+  // full-chart tint -- see the selRange !== vd check there.
+  if (selecting && selRange) {
+    viewDomain = selRange;
+    updateZoomToolbar();
+    redraw();
+  }
+  isMouseDown = false;
+  selecting = false;
 });
 $("charts").addEventListener("mouseleave", () => { hoverT = null; redraw(); });
+
+$("zoomtosel_btn")?.addEventListener("click", () => {
+  if (!selRange) return;
+  viewDomain = { t0: selRange.t0, t1: selRange.t1 };
+  updateZoomToolbar();
+  redraw();
+});
+$("resetzoom_btn")?.addEventListener("click", () => {
+  viewDomain = playheadT != null
+    ? { t0: replayData?.rows?.[0]?.epoch, t1: replayData?.rows?.[replayData.rows.length - 1]?.epoch }
+    : null;
+  updateZoomToolbar();
+  redraw();
+});
 
 // ---- pulls (per-pull peaks, so a multi-pull session keeps every pull's
 // numbers instead of one running session-wide max) ----
@@ -2138,6 +2329,385 @@ async function loadPulls() {
   if (r && r.pulls) renderPulls(r.pulls);
 }
 
+// ---- Virtual Dyno: RPM-binned power/torque curve from raw samples ----
+// One algorithm, client-side, reused for both an auto-detected live pull
+// (sliced from hist[]) and a manually brush-selected Replay range (sliced
+// from replayData.rows) -- see the plan's "one curve-computation algorithm"
+// note. The only thing that can't live here is the power/torque
+// calibration constant (_POWER_CONSTANT_BY_VIN/_BY_ENGINE only exist in
+// Python) -- callers needing to reconstruct power/torque for an old
+// recording that predates those columns fetch it once via
+// GET /api/dyno/power-constant and pass it in as opts.powerConstant.
+
+// Maps each adapter's raw channel ids to one common shape. E39/DS2 uses
+// P8/P12/P11/P7 (P12 is MAF in kg/h, needs g/s conversion); E87/KWP2000
+// uses plain names already in the right units.
+function normalizeSample(t, values) {
+  const rpm = values.P8 ?? values.rpm;
+  const maf_gps = values.P12 != null ? values.P12 * 1000 / 3600 : values.maf;
+  const iat_c = values.P11 ?? values.iat_c;
+  const map_kpa = values.P7 ?? values.map_kpa;
+  return {
+    t, rpm: rpm != null ? Number(rpm) : null,
+    maf_gps: maf_gps != null ? Number(maf_gps) : null,
+    iat_c: iat_c != null ? Number(iat_c) : null,
+    map_kpa: map_kpa != null ? Number(map_kpa) : null,
+    power_kw: values.power_kw != null ? Number(values.power_kw) : null,
+    torque_nm: values.torque_nm != null ? Number(values.torque_nm) : null,
+  };
+}
+
+// SAE J1349 correction factor. Pd_kpa = ambient-pressure proxy (max MAP
+// observed at WOT across the window -- manifold pressure approaches
+// ambient at wide-open throttle on a naturally-aspirated engine; see
+// diag_ui.py's E39Adapter/E87Adapter _POWER_CONSTANT comments for the
+// matching server-side rationale). T_kelvin = mean IAT + 273.15. No
+// humidity sensor exists on either car, so this omits J1349's dry-pressure
+// water-vapor subtraction -- a small (~1%) known over-correction,
+// documented rather than hidden. J1349 itself only trusts a factor within
+// 0.93-1.07 -- outside that the underlying conditions are considered too
+// far from standard to trust; still returned, just flagged.
+function saeJ1349CF(Pd_kpa, T_kelvin) {
+  const cf = 1.180 * (99.21 / Pd_kpa) * Math.sqrt(T_kelvin / 298) - 0.180;
+  return { cf, valid_range: cf >= 0.93 && cf <= 1.07 };
+}
+// DIN 70020's simplified form is structurally identical (reference
+// 20degC/101.3kPa vs SAE's 25degC/99.21kPa) but was NOT verified against a
+// primary DIN document in this session (it's a paywalled standard) --
+// offered as a second option, but SAE is the one to actually trust here.
+function din70020CF(Pd_kpa, T_kelvin) {
+  const cf = (101.3 / Pd_kpa) * Math.sqrt(T_kelvin / 293.0);
+  return { cf, valid_range: cf >= 0.93 && cf <= 1.07 };
+}
+
+function computeDynoCurve(rawSamples, opts) {
+  opts = opts || {};
+  const standard = opts.standard || "SAE_J1349";
+  const binWidth = opts.binWidth || 100;
+
+  // Time order first -- needed to detect a gear shift (RPM dropping mid-
+  // pull) before we throw the time axis away for RPM-binning.
+  let samples = rawSamples.slice().sort((a, b) => a.t - b.t)
+    .filter(s => s.rpm != null && s.rpm > 0);
+  if (!samples.length) return { insufficient: true, reason: "no rpm data in this window" };
+
+  // Gear-shift guard: keep only the longest monotonically-climbing segment.
+  let gearShiftDetected = false;
+  let segments = [[samples[0]]];
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].rpm < samples[i - 1].rpm - 500) {
+      gearShiftDetected = true;
+      segments.push([]);
+    }
+    segments[segments.length - 1].push(samples[i]);
+  }
+  samples = segments.reduce((a, b) => a.length >= b.length ? a : b);
+
+  // Reconstruct power/torque from maf_gps+rpm where missing (old
+  // recordings predating those columns) using the resolved calibration
+  // constant, same physics as diag_ui.py's live_sample().
+  const k = opts.powerConstant != null ? opts.powerConstant : 0.730786;
+  for (const s of samples) {
+    if (s.power_kw == null && s.maf_gps != null) {
+      s.power_kw = s.maf_gps * k;
+    }
+    if (s.torque_nm == null && s.power_kw != null && s.rpm > 50) {
+      s.torque_nm = s.power_kw * 1000 / (s.rpm * 2 * Math.PI / 60);
+    }
+  }
+  samples = samples.filter(s => s.power_kw != null);
+  if (!samples.length) return { insufficient: true, reason: "no power/torque data in this window" };
+
+  const t_start = samples[0].t, t_end = samples[samples.length - 1].t;
+
+  // Bin by RPM, interpolate empty buckets between populated neighbors,
+  // then a 3-bin moving average -- same recipe validated against real
+  // recorded pulls earlier this session.
+  samples.sort((a, b) => a.rpm - b.rpm);
+  const rpmMin = Math.round(samples[0].rpm / binWidth) * binWidth;
+  const rpmMax = Math.round(samples[samples.length - 1].rpm / binWidth) * binWidth;
+  const buckets = new Map();
+  for (const s of samples) {
+    const b = Math.round(s.rpm / binWidth) * binWidth;
+    if (!buckets.has(b)) buckets.set(b, []);
+    buckets.get(b).push(s);
+  }
+  const rpms = [];
+  for (let r = rpmMin; r <= rpmMax; r += binWidth) rpms.push(r);
+  const avg = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  let rawPower = rpms.map(r => buckets.has(r) ? avg(buckets.get(r).map(s => s.power_kw)) : null);
+  let rawTorque = rpms.map(r => buckets.has(r) ? avg(buckets.get(r).map(s => s.torque_nm)) : null);
+  const populated = rawPower.filter(v => v != null).length;
+  if (populated < 8) return { insufficient: true, reason: `only ${populated} rpm bins with data -- too sparse for a curve` };
+
+  function interpolate(vals) {
+    const out = vals.slice();
+    for (let i = 0; i < out.length; i++) {
+      if (out[i] != null) continue;
+      let lo = i - 1; while (lo >= 0 && out[lo] == null) lo--;
+      let hi = i + 1; while (hi < out.length && out[hi] == null) hi++;
+      if (lo >= 0 && hi < out.length) {
+        out[i] = out[lo] + (out[hi] - out[lo]) * (i - lo) / (hi - lo);
+      } else {
+        out[i] = out[lo >= 0 ? lo : hi];
+      }
+    }
+    return out;
+  }
+  function smooth3(vals) {
+    return vals.map((_, i) => {
+      const lo = Math.max(0, i - 1), hi = Math.min(vals.length, i + 2);
+      return avg(vals.slice(lo, hi));
+    });
+  }
+  const power = smooth3(interpolate(rawPower));
+  const torque = smooth3(interpolate(rawTorque));
+
+  // SAE/DIN correction, using window-aggregate pressure/temperature.
+  let correction = null;
+  const mapVals = samples.map(s => s.map_kpa).filter(v => v != null);
+  const iatVals = samples.map(s => s.iat_c).filter(v => v != null);
+  let cfFn = null;
+  if (mapVals.length && iatVals.length) {
+    const Pd_kpa = Math.max(...mapVals);
+    const T_kelvin = avg(iatVals) + 273.15;
+    const { cf, valid_range } = standard === "DIN_70020"
+      ? din70020CF(Pd_kpa, T_kelvin) : saeJ1349CF(Pd_kpa, T_kelvin);
+    correction = { standard, cf, pressure_proxy_kpa: Pd_kpa, iat_mean_c: avg(iatVals), valid_range };
+    cfFn = cf;
+  }
+
+  const bins = rpms.map((rpm, i) => ({
+    rpm, power_kw: round1(power[i]), torque_nm: round1(torque[i]),
+    power_kw_corrected: cfFn != null ? round1(power[i] * cfFn) : null,
+    torque_nm_corrected: cfFn != null ? round1(torque[i] * cfFn) : null,
+    sample_count: buckets.has(rpm) ? buckets.get(rpm).length : 0,
+  }));
+  const peakPower = Math.max(...bins.map(b => b.power_kw));
+  const peakTorque = Math.max(...bins.map(b => b.torque_nm));
+  const peaks = {
+    power_kw: peakPower, torque_nm: peakTorque,
+    power_kw_corrected: cfFn != null ? round1(peakPower * cfFn) : null,
+    torque_nm_corrected: cfFn != null ? round1(peakTorque * cfFn) : null,
+  };
+
+  return {
+    bins, peaks, correction, gear_shift_detected: gearShiftDetected,
+    window: { t_start, t_end, n_samples: samples.length },
+    bin_width_rpm: binWidth,
+  };
+}
+function round1(v) { return v == null ? null : Math.round(v * 10) / 10; }
+
+// ---- Virtual Dyno tab: dual-axis RPM chart, current run + overlaid past
+// runs. Dual-axis is a deliberate exception to "never dual axis" -- this is
+// the one universally-recognized dyno-chart convention (power left axis,
+// torque right axis, shared RPM x-axis).
+const DYNO_COLORS = ["#4da3ff", "#5dcaa5", "#eda100", "#d4537e", "#7f77dd", "#f0997b"];
+let dynoCurrent = null;   // {label, color, curve} -- the live/just-generated one
+let dynoOverlays = [];    // [{id, label, color, curve}] -- checked past runs
+let dynoRunsCache = [];   // last GET /api/dyno/runs response, for the picker
+
+function activeDynoCurves() {
+  const out = [];
+  if (dynoCurrent) out.push(dynoCurrent);
+  out.push(...dynoOverlays);
+  return out;
+}
+
+function drawDynoChart(cv, curves) {
+  const ctx = cv.getContext("2d");
+  const W = cv.width = cv.clientWidth * devicePixelRatio;
+  const H = cv.height = 280 * devicePixelRatio;
+  ctx.clearRect(0, 0, W, H);
+  const allBins = curves.flatMap(c => c.curve.bins);
+  if (!allBins.length) return;
+  const rpmMin = Math.min(...allBins.map(b => b.rpm));
+  const rpmMax = Math.max(...allBins.map(b => b.rpm));
+  const rpmSpan = (rpmMax - rpmMin) || 1;
+  const pVal = b => b.power_kw_corrected ?? b.power_kw;
+  const tVal = b => b.torque_nm_corrected ?? b.torque_nm;
+  let pLo = Math.min(0, ...allBins.map(pVal)), pHi = Math.max(...allBins.map(pVal));
+  let tLo = Math.min(0, ...allBins.map(tVal)), tHi = Math.max(...allBins.map(tVal));
+  pHi += (pHi - pLo) * 0.1 || 1;
+  tHi += (tHi - tLo) * 0.1 || 1;
+
+  const powerColor = "#4da3ff", torqueColor = "#eb6834";
+  ctx.strokeStyle = "#313945"; ctx.lineWidth = 1;
+  ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+  for (let i = 0; i <= 3; i++) {
+    const y = H * i / 3;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    ctx.fillStyle = powerColor;
+    ctx.fillText((pHi - (pHi - pLo) * i / 3).toFixed(0), 4 * devicePixelRatio, y + 12 * devicePixelRatio);
+    const tText = (tHi - (tHi - tLo) * i / 3).toFixed(0);
+    ctx.fillStyle = torqueColor;
+    ctx.fillText(tText, W - ctx.measureText(tText).width - 4 * devicePixelRatio, y + 12 * devicePixelRatio);
+  }
+  ctx.fillStyle = "#8b97a5";
+  for (let i = 0; i <= 4; i++) {
+    const rpm = Math.round(rpmMin + rpmSpan * i / 4);
+    const x = Math.min(W - 30 * devicePixelRatio, Math.max(20 * devicePixelRatio, W * i / 4));
+    ctx.fillText(rpm, x, H - 4 * devicePixelRatio);
+  }
+
+  for (const c of curves) {
+    const bins = c.curve.bins;
+    const line = (getVal, lo, hi, dash) => {
+      ctx.strokeStyle = c.color; ctx.lineWidth = 2 * devicePixelRatio;
+      ctx.setLineDash(dash ? [6 * devicePixelRatio, 3 * devicePixelRatio] : []);
+      ctx.beginPath();
+      bins.forEach((b, i) => {
+        const x = (b.rpm - rpmMin) / rpmSpan * W;
+        const y = H - (getVal(b) - lo) / (hi - lo) * H;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    };
+    line(pVal, pLo, pHi, false);
+    line(tVal, tLo, tHi, true);
+  }
+}
+
+function renderDynoLegend() {
+  const el = $("dynolegend");
+  const curves = activeDynoCurves();
+  el.innerHTML = curves.map(c => {
+    const pk = c.curve.peaks;
+    const pw = pk.power_kw_corrected ?? pk.power_kw;
+    const tq = pk.torque_nm_corrected ?? pk.torque_nm;
+    return `<span style="display:flex;align-items:center;gap:5px">
+      <span style="width:10px;height:10px;border-radius:2px;background:${c.color}"></span>
+      ${c.label} — ${pw?.toFixed(1)} kW / ${tq?.toFixed(1)} Nm
+      ${c.curve.correction ? (c.curve.correction.valid_range ? '' : ' <span style="color:var(--warn)">(CF out of range)</span>') : ' <span class="muted">(uncorrected)</span>'}
+    </span>`;
+  }).join("") || '<span class="muted">No curve to show yet.</span>';
+}
+
+function updateDynoChart() {
+  const cv = $("dynochart");
+  if (cv) drawDynoChart(cv, activeDynoCurves());
+  renderDynoLegend();
+}
+
+function setDynoCurrent(curve, label) {
+  if (curve.insufficient) {
+    $("dyno_current").textContent = "Not enough data for a curve: " + curve.reason;
+    dynoCurrent = null;
+  } else {
+    const pk = curve.peaks;
+    const pw = pk.power_kw_corrected ?? pk.power_kw, tq = pk.torque_nm_corrected ?? pk.torque_nm;
+    $("dyno_current").innerHTML = `<strong>${wsEsc(label)}</strong> — ${pw.toFixed(1)} kW / ${tq.toFixed(1)} Nm` +
+      (curve.gear_shift_detected ? ` <span class="muted">(gear shift detected, showing ${curve.bins[0].rpm}–${curve.bins[curve.bins.length-1].rpm} rpm only)</span>` : "") +
+      (curve.correction && !curve.correction.valid_range ? ` <span style="color:var(--warn)">correction factor out of validated range (${curve.correction.cf.toFixed(3)}) — treat corrected values with caution</span>` : "");
+    dynoCurrent = { label, color: DYNO_COLORS[0], curve };
+  }
+  updateDynoChart();
+}
+
+async function resolvePowerConstant(vin, engine) {
+  const q = vin ? `?vin=${encodeURIComponent(vin)}` : (engine ? `?engine=${encodeURIComponent(engine)}` : "");
+  const r = await api("/api/dyno/power-constant" + q);
+  return r && r.constant;
+}
+
+async function saveDynoRun(curve, source) {
+  const r = await api("/api/dyno/save", { curve: { ...curve, source } });
+  if (r && !r.error) loadDynoRuns();
+  return r;
+}
+
+async function loadDynoRuns() {
+  const el = $("dynoruns");
+  const r = await api("/api/dyno/runs" + passportQS());
+  dynoRunsCache = (r && r.runs) || [];
+  if (!dynoRunsCache.length) {
+    el.textContent = "No saved runs yet for this vehicle.";
+    return;
+  }
+  el.innerHTML = dynoRunsCache.slice().reverse().map((run, i) => {
+    const pk = run.peaks || {};
+    const when = (run.occurredAt || "").replace("T", " ").slice(0, 16);
+    return `<label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">
+      <input type="checkbox" data-runid="${run.id}">
+      #${run.pullNumber ?? "?"} — ${pk.power_kw?.toFixed(1) ?? "?"} kW / ${pk.torque_nm?.toFixed(1) ?? "?"} Nm
+      <span class="muted">${when}</span>
+    </label>`;
+  }).join("");
+  el.querySelectorAll("input[data-runid]").forEach((cb, i) => {
+    cb.onchange = async () => {
+      const id = cb.dataset.runid;
+      if (cb.checked) {
+        const curve = await api(`/api/dyno/curve/${id}` + passportQS());
+        if (curve && !curve.error) {
+          const color = DYNO_COLORS[(dynoOverlays.length + 1) % DYNO_COLORS.length];
+          dynoOverlays.push({ id, label: "#" + id.slice(0, 8), color, curve });
+        }
+      } else {
+        dynoOverlays = dynoOverlays.filter(o => o.id !== id);
+      }
+      updateDynoChart();
+    };
+  });
+}
+
+// Auto-generate from a just-finished live pull: slice hist[] to the pull's
+// window (from /api/pulls, already fetched by loadPulls()), compute the
+// curve, show it, and persist it -- "get the dyno graph automatically from
+// the app."
+async function autoGenerateDynoFromPull(pull) {
+  if (!pull || !pull.t_start || !pull.t_end) return;
+  const chanIds = ["P8", "rpm", "P12", "maf", "P11", "iat_c", "P7", "map_kpa", "power_kw", "torque_nm"];
+  const samples = [];
+  const ref = hist.rpm || hist.P8 || [];
+  for (const p of ref) {
+    if (p.t < pull.t_start - 0.5 || p.t > pull.t_end + 0.5) continue;
+    const values = {};
+    for (const id of chanIds) {
+      if (!hist[id] || !hist[id].length) continue;
+      const np = nearestPoint(hist[id], p.t);
+      if (Math.abs(np.t - p.t) < 1.0) values[id] = np.v;
+    }
+    samples.push(normalizeSample(p.t, values));
+  }
+  let powerConstant;
+  if (!samples.some(s => s.power_kw != null)) {
+    powerConstant = await resolvePowerConstant(state.vin, null);
+  }
+  const curve = computeDynoCurve(samples, { powerConstant });
+  if (curve.insufficient) return;  // don't clutter the tab/log with junk pulls
+  curve.pull_num = pull.num;
+  setDynoCurrent(curve, `Pull #${pull.num} (live)`);
+  await saveDynoRun(curve, "live_auto");
+}
+
+// Manual: brush-selected Replay range -> same computeDynoCurve, sourced
+// from replayData.rows instead of hist[].
+async function generateDynoFromSelection() {
+  if (!selRange || !replayData) return;
+  const samples = replayData.rows
+    .filter(r => r.epoch >= selRange.t0 && r.epoch <= selRange.t1)
+    .map(r => normalizeSample(r.epoch, r.values));
+  let powerConstant;
+  if (!samples.some(s => s.power_kw != null)) {
+    // Old recording predates the power_kw/torque_nm columns -- resolve the
+    // server-side calibration constant (vin/engine unknown for an
+    // arbitrary loaded CSV, so this falls back to the generic default).
+    powerConstant = await resolvePowerConstant(null, null);
+  }
+  const curve = computeDynoCurve(samples, { powerConstant });
+  showTab("analysis");
+  $("dynosec")?.scrollIntoView();
+  if (curve.insufficient) {
+    $("dyno_current").textContent = "Not enough data in that selection: " + curve.reason;
+    return;
+  }
+  setDynoCurrent(curve, "Replay selection");
+  await saveDynoRun(curve, "replay_selection");
+}
+$("gendyno_btn")?.addEventListener("click", generateDynoFromSelection);
+
 // ---- live stream ----
 $("livebtn").onclick = () => {
   if (es) { es.close(); es = null;
@@ -2166,8 +2736,16 @@ $("livebtn").onclick = () => {
         pullBadge.style.display = "none";
       }
       // A pull just finished (true -> false) -- pick up its peaks so a
-      // multi-pull session keeps every pull's numbers, not just the latest.
-      if (lastPullActive && !d.pull) loadPulls();
+      // multi-pull session keeps every pull's numbers, not just the latest,
+      // and auto-generate its dyno curve (the most recently appended
+      // PULLS_LOG entry after this refresh is exactly the pull that just
+      // ended -- no race, PULLS_LOG is appended server-side synchronously
+      // before this transition could even be reported).
+      if (lastPullActive && !d.pull) {
+        loadPulls().then(() => {
+          if (pulls.length) autoGenerateDynoFromPull(pulls[pulls.length - 1]);
+        });
+      }
       lastPullActive = !!d.pull;
       // Update health panel
       updateHealth(d.health || {});
@@ -2583,7 +3161,6 @@ $("replayspeed").onchange = (e) => {
 $("replayprogress").oninput = (e) => {
   if (replayPlaying) pauseReplay();
   replayIndex = parseInt(e.target.value);
-  rebuildChartHistoryToIndex(replayIndex);
   updateReplayFrame();
 };
 
@@ -2956,6 +3533,7 @@ function showTab(name) {
     sec.classList.toggle("tabhide", sec.dataset.tab !== name));
   if (name === "passport") loadPassport();
   if (name === "workshop") loadWorkshop();
+  if (name === "analysis") { loadDynoRuns(); loadRecordingsPicker(); }
 }
 
 // ---- Vehicle Passport (replay the local event log into a story) ----
@@ -3237,34 +3815,6 @@ function wsEsc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-async function loadWorkshopProfile() {
-  const box = $("ws_profile_box");
-  const { workshop } = await api("/api/workshop");
-  if (!workshop) {
-    box.innerHTML = `
-      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
-        <input id="ws_name" placeholder="Workshop name" style="flex:1;min-width:160px">
-        <input id="ws_domain" placeholder="Domain (optional)" style="width:160px">
-        <button id="ws_setup_btn">Set up workshop</button>
-      </div>
-      <div id="ws_setup_result" class="muted" style="font-size:11px;margin-top:4px"></div>`;
-    $("ws_setup_btn").onclick = async () => {
-      const name = $("ws_name").value.trim();
-      const result = $("ws_setup_result");
-      if (!name) { result.textContent = "Enter a name."; return; }
-      const domain = $("ws_domain").value.trim();
-      const r = await api("/api/workshop/set", { name, domain });
-      if (r.error) { result.textContent = "Error: " + r.error; return; }
-      loadWorkshopProfile();
-    };
-    return;
-  }
-  box.innerHTML = `
-    <div>Signed in as <strong>${wsEsc(workshop.name)}</strong>${workshop.domain ? ` @ ${wsEsc(workshop.domain)}` : ""}
-      <button id="ws_clear_btn" style="margin-left:8px">Clear</button></div>
-    <div class="muted" style="font-size:11px;margin-top:4px">Self-asserted -- not domain-verified like a cloud-registered workshop.</div>`;
-  $("ws_clear_btn").onclick = async () => { await api("/api/workshop/clear", {}); loadWorkshopProfile(); };
-}
 async function loadWorkshopCloud() {
   const box = $("ws_cloud_box");
   const s = await api("/api/cloud/session");
@@ -3281,13 +3831,9 @@ async function loadWorkshopCloud() {
     };
     return;
   }
-  // Prefill from the local self-asserted profile's domain, if any -- the
-  // common case is signing in to the same domain already set up above.
-  const local = await api("/api/workshop");
-  const domainHint = (local.workshop && local.workshop.domain) || "";
   box.innerHTML = `
     <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
-      <input id="ws_cloud_email" type="email" placeholder="${domainHint ? `you@${wsEsc(domainHint)}` : "you@yourdomain.com"}" style="flex:1;min-width:200px">
+      <input id="ws_cloud_email" type="email" placeholder="you@yourdomain.com" style="flex:1;min-width:200px">
       <button id="ws_cloud_otp_req_btn">Send code</button>
     </div>
     <div class="row" id="ws_cloud_code_row" style="display:none;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px">
@@ -3318,10 +3864,13 @@ async function loadWorkshopCloud() {
 }
 async function loadGarage() {
   const el = $("ws_garage");
-  const { vehicles, error } = await api("/api/garage");
+  const showHidden = $("ws_show_hidden")?.checked;
+  const { vehicles, error } = await api("/api/garage" + (showHidden ? "?include_hidden=1" : ""));
   if (error) { el.textContent = error; return; }
   if (!vehicles || !vehicles.length) {
-    el.textContent = "No vehicles yet -- scan a car or create a passport to start the garage.";
+    el.textContent = showHidden
+      ? "No vehicles yet -- scan a car or create a passport to start the garage."
+      : "No vehicles yet -- scan a car or create a passport to start the garage. (Check \"Show removed vehicles\" if you expected one here.)";
     return;
   }
   el.innerHTML = vehicles.slice().reverse().map((s, i) => {
@@ -3331,10 +3880,11 @@ async function loadGarage() {
     const m = s.mileage;
     const rowId = `wsrow${i}`;
     const descFull = wsEsc(desc) + (v.engine ? ` · ${wsEsc(v.engine)}` : "");
-    return `<div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px">
+    const dim = s.hidden ? "opacity:0.55" : "";
+    return `<div style="background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:8px;${dim}">
       <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
-          <div style="font-weight:600">${s.name ? wsEsc(s.name) : descFull}</div>
+          <div style="font-weight:600">${s.name ? wsEsc(s.name) : descFull}${s.hidden ? ' <span class="muted" style="font-weight:400;font-size:11px">(removed)</span>' : ""}</div>
           ${s.name ? `<div class="muted" style="font-size:11px">${descFull}</div>` : ""}
           <div class="muted" style="font-size:11px">${vin ? `VIN ${wsEsc(vin)}` : "no VIN"} · ${s.passport_urn || ""}</div>
         </div>
@@ -3345,7 +3895,13 @@ async function loadGarage() {
           <span>${s.chain_ok ? "✓ intact" : "✗ broken"}</span>
         </div>
       </div>
-      ${vin ? `<button id="${rowId}_view_btn" style="font-size:11px;margin-top:8px">📖 View passport</button>` : ""}
+      <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
+        ${vin && !s.hidden ? `<button id="${rowId}_view_btn" style="font-size:11px">📖 View passport</button>` : ""}
+        ${s.hidden
+          ? `<button id="${rowId}_unhide_btn" style="font-size:11px">↺ Restore to garage</button>`
+          : `<button id="${rowId}_hide_btn" style="font-size:11px">🗑 Remove from garage</button>`}
+      </div>
+      ${s.hidden ? "" : `
       <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
         <input id="${rowId}_name" placeholder="Name this vehicle" value="${wsEsc(s.name || "")}" style="flex:1;min-width:140px;font-size:12px">
         <button id="${rowId}_name_btn" style="font-size:11px">Save name</button>
@@ -3357,19 +3913,32 @@ async function loadGarage() {
         <button id="${rowId}_btn">Log</button>
       </div>
       <div id="${rowId}_result" class="muted" style="font-size:11px;margin-top:4px"></div>` :
-      `<div class="muted" style="font-size:11px;margin-top:8px">No VIN yet -- connect this vehicle to log against it from the Passport tab.</div>`}
+      `<div class="muted" style="font-size:11px;margin-top:8px">No VIN yet -- connect this vehicle to log against it from the Passport tab.</div>`}`}
     </div>`;
   }).join("");
   vehicles.slice().reverse().forEach((s, i) => {
     const rowId = `wsrow${i}`;
     const urn = s.passport_urn;
+    const vin = (s.vehicle || {}).vin;
+    if (s.hidden) {
+      $(`${rowId}_unhide_btn`).onclick = async () => {
+        await api("/api/garage/hide", { urn, hidden: false });
+        loadGarage();
+      };
+      return;
+    }
+    $(`${rowId}_hide_btn`).onclick = async () => {
+      const label = s.name || vin || "this vehicle";
+      if (!confirm(`Remove ${label} from the garage? Its passport history is kept and this can be undone from "Show removed vehicles".`)) return;
+      await api("/api/garage/hide", { urn, hidden: true });
+      loadGarage();
+    };
     $(`${rowId}_name_btn`).onclick = async () => {
       if (!urn) return;
       const name = $(`${rowId}_name`).value.trim();
       await api("/api/vehicle/name", { urn, name });
       loadGarage();
     };
-    const vin = (s.vehicle || {}).vin;
     if (!vin) return;
     $(`${rowId}_view_btn`).onclick = () => openPassportFor(vin, urn);
     $(`${rowId}_btn`).onclick = async () => {
@@ -3385,7 +3954,8 @@ async function loadGarage() {
     };
   });
 }
-function loadWorkshop() { loadWorkshopProfile(); loadWorkshopCloud(); loadGarage(); }
+$("ws_show_hidden")?.addEventListener("change", loadGarage);
+function loadWorkshop() { loadWorkshopCloud(); loadGarage(); }
 
 document.querySelectorAll("[data-tabbtn]").forEach(b =>
   b.onclick = () => showTab(b.dataset.tabbtn));

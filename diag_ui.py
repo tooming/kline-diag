@@ -23,6 +23,7 @@ import urllib.parse
 import sys
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,6 +89,12 @@ MS41_PROFILES = {
         ("E11", "VANOS Angle", "VANOS", True),
         ("P2", "Coolant Temp", "Temps", False),
         ("P11", "Intake Temp", "Temps", False),
+        # Real MAP sensor -- used (at WOT, as an ambient-pressure proxy) for
+        # dyno SAE/DIN correction. NOT P24 ("Atmospheric Pressure" in
+        # ms41_ram_params.json) -- that entry's own description literally
+        # says "temporary fake entry for the Dyno tab" and its expr is a
+        # hardcoded constant, not a real reading.
+        ("P7", "MAP", "Engine", False),
         ("P17", "Battery", "Temps", True),
     ],
     "fuel": [
@@ -586,6 +593,17 @@ class E87Adapter:
          "group": "Fuel", "graph": False},
         {"id": "ltft", "label": "Long Fuel Trim", "unit": "%",
          "group": "Fuel", "graph": False},
+        # UNVERIFIED against real hardware -- unlike the rest of this list
+        # (confirmed via power_diag.py pids output), whether this DME
+        # answers PID 0x0B/0x33 at all hasn't been tested on the real car.
+        # Used for SAE/DIN dyno correction (manifold pressure at WOT as an
+        # ambient-pressure proxy) if present; if this DME never answers,
+        # they'll simply stay absent from every sample, same as any other
+        # unsupported PID, and dyno curves fall back to uncorrected.
+        {"id": "map_kpa", "label": "Manifold Pressure", "unit": "kPa",
+         "group": "Engine", "graph": False},
+        {"id": "baro_kpa", "label": "Barometric Pressure", "unit": "kPa",
+         "group": "Engine", "graph": False},
     ]
     # PIDs confirmed supported by this car's DME (power_diag.py pids output);
     # channel id -> Mode-01 PID, decoded via obd2.decode_pid (same SAE J1979
@@ -594,6 +612,8 @@ class E87Adapter:
         "rpm": 0x0C, "coolant_c": 0x05, "speed_kmh": 0x0D,
         "engine_load": 0x04, "throttle": 0x11, "iat_c": 0x0F, "maf": 0x10,
         "timing_advance": 0x0E, "stft": 0x06, "ltft": 0x07,
+        # unverified -- see the map_kpa/baro_kpa live_channels comment above
+        "map_kpa": 0x0B, "baro_kpa": 0x33,
     }
     # kW per g/s of MAF -- calibrated per specific car, keyed by VIN, where
     # a real WOT pull's peak MAF plus the engine's known factory rating
@@ -1143,15 +1163,22 @@ def evaluate_health(values):
 def detect_pull(values):
     """Detect pull start/end based on throttle, load, and RPM.
 
-    Start: throttle > 80%, load > 70%, RPM increasing
-    End: throttle < 60% OR load < 50% (hysteresis to avoid flicker)
+    Start: throttle > 80%, RPM increasing (load deliberately NOT required
+    here -- found empirically that throttle sustains ~90-100% while load is
+    still ramping from ~20% to 70%+ over several seconds, so requiring
+    load>70 at the start missed the first few seconds of a real WOT pull).
+    End: throttle < 60% OR load < 50% (hysteresis to avoid flicker) --
+    load still gates the end condition, only the start got loosened.
 
     While a pull is active, tracks the running peak of every numeric channel
     (not just throttle/load/rpm) so that e.g. peak power_kw/torque_nm/maf are
     available too -- see PULL_STATE["peaks"]. On "end", the finished pull's
     peaks are snapshotted into PULLS_LOG for the UI to list per-pull, so a
     session with several pulls keeps each one's numbers instead of only the
-    single session-wide max.
+    single session-wide max. The full curve (not just peaks) and the
+    passport DynoRun event are the client's job now -- see ui.html's
+    computeDynoCurve()/POST /api/dyno/save -- this function only tracks
+    peaks for the lightweight in-session "Pulls this session" panel.
 
     Returns: ("start", pull_number) | ("end", pull_number) | None
     """
@@ -1175,7 +1202,7 @@ def detect_pull(values):
 
     if not PULL_STATE["active"]:
         # Check for pull start
-        if throttle > 80 and load > 70 and rpm_increasing:
+        if throttle > 80 and rpm_increasing:
             PULL_STATE["active"] = True
             PULL_STATE["counter"] += 1
             PULL_STATE["peaks"] = {}
@@ -1195,13 +1222,6 @@ def detect_pull(values):
                 "peaks": peaks,
             })
             del PULLS_LOG[:-50]  # cap; a session isn't going to need more
-            try:    # append an OVPF DynoRun event for this pull's peaks
-                ovpf_producer.record_dyno_run(
-                    _current_vin(), peaks,
-                    duration_s=(t_end - t_start) if t_start else None,
-                    num=PULL_STATE["counter"])
-            except Exception:
-                pass
             return ("end", PULL_STATE["counter"])
 
     return None
@@ -1445,17 +1465,82 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(st)
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
-        if self.path == "/api/workshop":
-            return self._json({"workshop": ovpf_producer.get_workshop()})
         if self.path == "/api/pulls":
             # Finished pulls this session with their peak values -- see
             # detect_pull(). Client polls this right after it sees the live
             # "pull" flag drop, so a multi-pull session keeps every pull's
             # numbers rather than just one running max.
             return self._json({"pulls": PULLS_LOG})
+        if self.path.startswith("/api/dyno/runs"):
+            # Past dyno curves for a vehicle, read straight from its OVPF
+            # passport log (DynoRun events) -- no second index to drift out
+            # of sync with the log. ?vin= browses any garage vehicle, same
+            # convention as _qs_passport_state(); defaults to the connected
+            # car.
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            vin = (q.get("vin") or [""])[0].strip() or _current_vin()
+            try:
+                path = ovpf_producer._log_path(vin)
+                events = ovpf_producer.ovpf_core.load(path)
+            except Exception as e:
+                return self._json({"error": str(e)}, 500)
+            runs = []
+            for e in events:
+                d = e.get("data", {})
+                if e.get("type") != "DynoRun" or not d.get("curveRef"):
+                    continue
+                runs.append({
+                    "id": os.path.basename(d["curveRef"]).removesuffix(".json"),
+                    "occurredAt": e.get("occurredAt"),
+                    "peaks": {"power_kw": d.get("power", {}).get("value"),
+                             "torque_nm": d.get("torque", {}).get("value")},
+                    "duration_s": d.get("duration", {}).get("value"),
+                    "pullNumber": d.get("pullNumber"),
+                    "curveRef": d["curveRef"]})
+            return self._json({"vin": vin, "runs": runs})
+        if self.path.startswith("/api/dyno/curve/"):
+            # A saved curve's full data (bins etc.), for overlay -- see
+            # POST /api/dyno/save. Same path-containment check
+            # snapshot.load_snapshot already does; the id is client-supplied
+            # and must not be trusted as a bare path component.
+            import snapshot as _snap
+            parsed = urllib.parse.urlsplit(self.path)
+            curve_id = parsed.path[len("/api/dyno/curve/"):]
+            q = urllib.parse.parse_qs(parsed.query)
+            vin = (q.get("vin") or [""])[0].strip() or _current_vin()
+            curve_path = os.path.join(
+                _snap.BACKUP_ROOT, _snap._safe_vin(vin), "dyno_runs",
+                curve_id + ".json")
+            real_root = os.path.realpath(_snap.BACKUP_ROOT)
+            real_curve = os.path.realpath(curve_path)
+            if os.path.commonpath([real_root, real_curve]) != real_root:
+                return self._json({"error": "invalid curve id"}, 400)
+            try:
+                with open(real_curve) as f:
+                    return self._json(json.load(f))
+            except OSError:
+                return self._json({"error": "no such curve"}, 404)
+        if self.path.startswith("/api/dyno/power-constant"):
+            # Resolves the server-side calibration constant (see
+            # E87Adapter._POWER_CONSTANT_BY_VIN / E39Adapter.
+            # _POWER_CONSTANT_BY_ENGINE) so the client can reconstruct
+            # power/torque for an old CSV recorded before those columns
+            # existed. ?vin= for the E87 path, ?engine= for the E39 path
+            # (DS2 has no confirmed VIN read -- see E39Adapter.read_vin --
+            # so engine, not vin, is what the E39 calibrates by).
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            vin = (q.get("vin") or [""])[0].strip()
+            engine = (q.get("engine") or [""])[0].strip()
+            if vin and vin in E87Adapter._POWER_CONSTANT_BY_VIN:
+                return self._json({"constant": E87Adapter._POWER_CONSTANT_BY_VIN[vin],
+                                  "source": "vin"})
+            if engine and engine in E39Adapter._POWER_CONSTANT_BY_ENGINE:
+                return self._json({"constant": E39Adapter._POWER_CONSTANT_BY_ENGINE[engine],
+                                  "source": "engine"})
+            return self._json({"constant": E87Adapter._DEFAULT_POWER_CONSTANT,
+                              "source": "default"})
         if self.path.startswith("/api/cloud/session"):
-            # Cloud sign-in status (separate from the local, self-asserted
-            # workshop profile above) + how many local events are queued to
+            # Cloud sign-in status + how many local events are queued to
             # push. Optional ?urn=/?vin= (see _qs_passport_state()) reports
             # sync status for a browsed garage vehicle instead of the
             # connected one.
@@ -1466,12 +1551,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"user": ovpf_cloud.get_user_session(),
                               "workshop": ovpf_cloud.get_workshop_session(),
                               "sync": ovpf_cloud.sync_status(vin, urn)})
-        if self.path == "/api/garage":
+        if self.path.startswith("/api/garage"):
             # Every vehicle this laptop has a passport for, not just
             # whichever one is currently connected -- the workshop's
-            # "garage" view.
+            # "garage" view. ?include_hidden=1 also returns vehicles
+            # removed from the garage (see /api/garage/hide) so the UI
+            # can offer to un-hide them.
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            include_hidden = (q.get("include_hidden") or [""])[0] == "1"
             try:
-                return self._json({"vehicles": ovpf_producer.list_passports()})
+                return self._json({"vehicles": ovpf_producer.list_passports(include_hidden)})
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
         # Query-stripped: a deep link like "/?passport=<id>" (see
@@ -1781,6 +1870,26 @@ class Handler(BaseHTTPRequestHandler):
             self._json([e for e in RAW_LOG if e["seq"] > since])
         # --- Additive analysis endpoints (Agent-2, Phases 5/6/7/11) ---
         # Read-only, operate on saved files; independent of live adapter.
+        elif self.path == "/api/recordings/dir":
+            # Where drive_log_*.csv actually lands -- surfaced so the UI
+            # can tell the user, and so Replay can offer to load from
+            # here instead of only an OS file-picker dialog.
+            self._json({"path": DATA})
+        elif self.path.startswith("/api/recordings/"):
+            # Serve one recording's raw content by name, for the Replay
+            # tab's server-backed picker -- same DATA dir the recorder
+            # writes to (see /api/recordings/dir), basename-only so a
+            # crafted name can't escape it via "../".
+            name = urllib.parse.unquote(self.path[len("/api/recordings/"):])
+            p = os.path.join(DATA, os.path.basename(name))
+            if not os.path.isfile(p):
+                return self._json({"error": "recording not found"}, 404)
+            try:
+                with open(p, encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except OSError as e:
+                return self._json({"error": str(e)}, 500)
+            self._json({"name": os.path.basename(p), "content": content})
         elif self.path.startswith("/api/recordings"):
             import glob as _glob
             files = sorted(_glob.glob(os.path.join(DATA, "drive_log_*.csv")),
@@ -2423,15 +2532,19 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/compare":
                 import compare as _cmp
                 b = self._body()
-                pa = os.path.join(HERE, os.path.basename(b.get("a", "")))
-                pb = os.path.join(HERE, os.path.basename(b.get("b", "")))
+                # Recordings are written under DATA (paths.data_dir(), the
+                # writable dir), not HERE (paths.resource_dir(), read-only
+                # in a frozen build) -- the two happen to be the same
+                # directory in dev, which is what let this go unnoticed.
+                pa = os.path.join(DATA, os.path.basename(b.get("a", "")))
+                pb = os.path.join(DATA, os.path.basename(b.get("b", "")))
                 if not (os.path.isfile(pa) and os.path.isfile(pb)):
                     return self._json({"error": "recording not found"}, 400)
                 self._json(_cmp.compare_recordings(pa, pb))
             elif self.path == "/api/correlate":
                 import correlate as _corr
                 b = self._body()
-                p = os.path.join(HERE, os.path.basename(b.get("recording", "")))
+                p = os.path.join(DATA, os.path.basename(b.get("recording", "")))
                 if not os.path.isfile(p):
                     return self._json({"error": "recording not found"}, 400)
                 try:
@@ -2543,7 +2656,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Protocol Explorer: parse a K-line trace file (offline).
                 import trace as _tr
                 b = self._body()
-                p = os.path.join(HERE, os.path.basename(b.get("file", "")))
+                p = os.path.join(DATA, os.path.basename(b.get("file", "")))
                 if not os.path.isfile(p):
                     return self._json({"error": "trace file not found"}, 400)
                 frames = _tr.parse_trace(p)
@@ -2554,8 +2667,8 @@ class Handler(BaseHTTPRequestHandler):
                 # Diff two traces to find OEM-only operations (offline).
                 import trace as _tr
                 b = self._body()
-                pa = os.path.join(HERE, os.path.basename(b.get("a", "")))
-                pb = os.path.join(HERE, os.path.basename(b.get("b", "")))
+                pa = os.path.join(DATA, os.path.basename(b.get("a", "")))
+                pb = os.path.join(DATA, os.path.basename(b.get("b", "")))
                 if not (os.path.isfile(pa) and os.path.isfile(pb)):
                     return self._json({"error": "trace file not found"}, 400)
                 self._json(_tr.trace_diff(_tr.parse_trace(pa),
@@ -2606,20 +2719,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not urn:
                     return self._json({"error": "urn required"}, 400)
                 self._json({"name": ovpf_producer.set_vehicle_name(urn, b.get("name"))})
-            elif self.path == "/api/workshop/set":
-                # Self-asserted local workshop identity -- no DNS/OTP, see
-                # ovpf_producer.get_workshop. Once set, every event logged
-                # (diagnostic or manual) is attributed to it instead of
-                # "Manual"/"Diagnostic".
+            elif self.path == "/api/garage/hide":
+                # "Remove from garage" -- a hide, not a delete (see
+                # ovpf_producer.set_vehicle_hidden). Reversible via the
+                # same endpoint with hidden=false.
                 b = self._body()
-                name = (b.get("name") or "").strip()
-                if not name:
-                    return self._json({"error": "name required"}, 400)
-                domain = (b.get("domain") or "").strip() or None
-                self._json({"workshop": ovpf_producer.set_workshop(name, domain)})
-            elif self.path == "/api/workshop/clear":
-                ovpf_producer.clear_workshop()
-                self._json({"workshop": None})
+                urn = (b.get("urn") or "").strip()
+                if not urn:
+                    return self._json({"error": "urn required"}, 400)
+                hidden = bool(b.get("hidden", True))
+                self._json({"urn": urn, "hidden": ovpf_producer.set_vehicle_hidden(urn, hidden)})
             elif self.path == "/api/cloud/otp/request":
                 # Personal cloud identity -- any email, OTP-verified,
                 # satisfies the provider's write gate (no pre-existing
@@ -2703,6 +2812,44 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(ovpf_cloud.push_passport(vin, urn))
                 except ovpf_cloud.CloudError as e:
                     self._json({"error": str(e)}, 400)
+            elif self.path == "/api/dyno/save":
+                # Persist a curve computed client-side (ui.html's
+                # computeDynoCurve -- see its comment for why this is the
+                # one write path for a DynoRun event now, not
+                # detect_pull()). Body: {vin?, curve: {...}, note?}. curve
+                # is the full shape computeDynoCurve returns (bins, peaks,
+                # correction, window, ...); this endpoint just adds an id,
+                # writes it to disk, and records the summary event.
+                import snapshot as _snap
+                b = self._body()
+                vin = (b.get("vin") or "").strip() or _current_vin()
+                curve = b.get("curve")
+                if not curve or not curve.get("bins"):
+                    return self._json({"error": "curve with bins required"}, 400)
+                curve_id = str(uuid.uuid4())
+                vdir = os.path.join(_snap.BACKUP_ROOT, _snap._safe_vin(vin),
+                                    "dyno_runs")
+                os.makedirs(vdir, exist_ok=True)
+                curve["id"] = curve_id
+                curve["vin"] = vin
+                curve["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                if b.get("note"):
+                    curve["note"] = b["note"]
+                with open(os.path.join(vdir, curve_id + ".json"), "w") as f:
+                    json.dump(curve, f)
+                pk = curve.get("peaks", {})
+                try:
+                    ovpf_producer.record_dyno_run(
+                        vin,
+                        {"power_kw": pk.get("power_kw_corrected") if pk.get("power_kw_corrected") is not None else pk.get("power_kw"),
+                         "torque_nm": pk.get("torque_nm_corrected") if pk.get("torque_nm_corrected") is not None else pk.get("torque_nm")},
+                        duration_s=(curve.get("window", {}).get("t_end", 0)
+                                   - curve.get("window", {}).get("t_start", 0)) or None,
+                        num=curve.get("pull_num"),
+                        curve_ref=f"dyno_runs/{curve_id}.json")
+                except Exception:
+                    pass
+                self._json({"id": curve_id, "curveRef": f"dyno_runs/{curve_id}.json"})
             elif self.path == "/api/garage/service":
                 # Log a service against any vehicle in the garage, not
                 # just the one currently connected (see /api/passport/service

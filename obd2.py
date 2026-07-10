@@ -25,9 +25,11 @@ MODE_VEHICLE_INFO = 0x09
 
 PID_NAMES = {
     0x04: "engine load %", 0x05: "coolant temp C", 0x06: "short fuel trim %",
-    0x07: "long fuel trim %", 0x0C: "RPM", 0x0D: "speed km/h",
+    0x07: "long fuel trim %", 0x0B: "intake manifold pressure kPa",
+    0x0C: "RPM", 0x0D: "speed km/h",
     0x0E: "timing advance deg", 0x0F: "intake air temp C",
     0x10: "MAF g/s", 0x11: "throttle %", 0x1F: "run time s",
+    0x33: "barometric pressure kPa",
     0x42: "control module V", 0x5C: "oil temp C",
 }
 
@@ -40,6 +42,8 @@ def decode_pid(pid, data):
         return data[0] - 40
     if pid in (0x06, 0x07) and data:
         return (data[0] - 128) * 100.0 / 128.0
+    if pid in (0x0B, 0x33) and data:  # SAE J1979: 1 byte, 1:1 kPa
+        return float(data[0])
     if pid == 0x0C and len(data) >= 2:
         return ((data[0] << 8) | data[1]) / 4.0
     if pid == 0x0D and data:

@@ -140,14 +140,24 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(result["pushed"], 0)
         self.assertEqual(len(result["errors"]), 1)
 
+    def _append_workshop_event(self, urn, path):
+        """A producer.type "Workshop" event with no cloud session behind
+        it -- opendiag itself can no longer create these (the local
+        self-asserted Workshop identity was removed as confusing UX), but
+        push_passport still has to refuse one if it shows up (a hand-edited
+        or pre-removal .ovpf.ndjson file) rather than trust it blindly."""
+        import ovpf_core
+        producer = {"type": "Workshop", "name": "Tooming Workshop",
+                    "domain": "skoor.ee", "version": prod.VERSION}
+        ovpf_core.append(path, ovpf_core.envelope(
+            urn, "OdometerReading", {"value": 123456, "unit": "KMT"}, producer))
+
     def test_push_passport_blocks_unverified_self_asserted_workshop(self):
-        """The local Workshop panel (ovpf_producer.set_workshop) is
-        self-asserted, no DNS/OTP behind it. Signing into the cloud with a
-        personal session and pushing must not smuggle that unverified name
-        onto the passport as if it were a real workshop."""
-        prod.set_workshop("Tooming Workshop", domain="skoor.ee")
-        prod.ensure_passport(self.vin)
-        prod.record_odometer(self.vin, 123456)
+        """Signing into the cloud with a personal session and pushing must
+        not smuggle an unverified Workshop-attributed event onto the
+        passport as if it were a real workshop."""
+        path, urn = prod.ensure_passport(self.vin)
+        self._append_workshop_event(urn, path)
         cloud.set_user_session("me@example.com", "tok")
 
         fake = FakeHttp([])
@@ -157,9 +167,8 @@ class CloudTest(unittest.TestCase):
         self.assertEqual(fake.calls, [])  # refused before any network call
 
     def test_push_passport_allows_verified_workshop_domain_match(self):
-        prod.set_workshop("Tooming Workshop", domain="skoor.ee")
-        prod.ensure_passport(self.vin)
-        prod.record_odometer(self.vin, 123456)
+        path, urn = prod.ensure_passport(self.vin)
+        self._append_workshop_event(urn, path)
         cloud.set_workshop_session("skoor.ee", "ws-tok")
 
         fake = FakeHttp([

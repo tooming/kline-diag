@@ -89,32 +89,7 @@ class ProducerTest(unittest.TestCase):
         path = prod._log_path(self.vin)
         self.assertEqual(ovpf_core.verify_chain(ovpf_core.load(path)), [])
 
-    def test_workshop_profile_set_get_clear(self):
-        self.assertIsNone(prod.get_workshop())
-        prod.set_workshop("Skoor Garage", "skoor.ee")
-        self.assertEqual(prod.get_workshop(), {"name": "Skoor Garage", "domain": "skoor.ee"})
-        prod.clear_workshop()
-        self.assertIsNone(prod.get_workshop())
-
-    def test_workshop_profile_attributes_diagnostic_and_manual_events(self):
-        prod.set_workshop("Skoor Garage", "skoor.ee")
-        fault_ev = prod.record_faults(self.vin, 0x12, "DME", {
-            "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
-                                     "raw": "71"}]})
-        service_ev = prod.record_service(self.vin, "Changed engine oil")
-        for ev in (fault_ev, service_ev):
-            self.assertEqual(ev["producer"]["type"], "Workshop")
-            self.assertEqual(ev["producer"]["name"], "Skoor Garage")
-            self.assertEqual(ev["producer"]["domain"], "skoor.ee")
-            self.assertNotIn("verified", ev["producer"])  # self-asserted, never claims verification
-
-    def test_workshop_profile_without_domain_omits_domain_field(self):
-        prod.set_workshop("Garage With No Website")
-        ev = prod.record_service(self.vin, "Changed engine oil")
-        self.assertEqual(ev["producer"]["type"], "Workshop")
-        self.assertNotIn("domain", ev["producer"])
-
-    def test_no_workshop_profile_keeps_existing_producers(self):
+    def test_faults_and_service_use_default_producers(self):
         fault_ev = prod.record_faults(self.vin, 0x12, "DME", {
             "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
                                      "raw": "71"}]})

@@ -63,50 +63,13 @@ def _last_event(path, etype):
     return found
 
 
-# --- workshop profile (local-only identity) --------------------------------
-# A self-asserted "I'm a workshop" identity, entirely local -- no DNS/OTP
-# verification like the cloud providers (see docs/TRUST.md), because
-# there's no server to verify against when running fully offline. Events
-# stamped under it never carry `verified: true`, so any UI (or a future
-# cloud sync) shows them as an unverified claim -- the same bucket as any
-# other self-reported producer, not silently upgraded to a "verified
-# workshop" badge just because someone edited this file.
-
-def _workshop_path():
-    return os.path.join(paths.data_dir(), "workshop.json")
-
-
-def get_workshop():
-    """The active local workshop profile ({"name": ..., "domain": ...}),
-    or None if nobody's set one (the common single-owner case)."""
-    try:
-        with open(_workshop_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-
-
-def set_workshop(name, domain=None):
-    profile = {"name": name, "domain": domain or None}
-    with open(_workshop_path(), "w", encoding="utf-8") as f:
-        json.dump(profile, f)
-    return profile
-
-
-def clear_workshop():
-    try:
-        os.remove(_workshop_path())
-    except FileNotFoundError:
-        pass
-
-
 # --- vehicle nickname (local-only, not an OVPF event) -----------------------
 # A personal label ("The E39", "Mom's daily") for the garage/passport UI --
 # distinct from VehicleIdentified facts (VIN/make/model/year), which are
 # immutable, hash-chained, and get pushed to cloud sync. A nickname is
 # neither a diagnostic fact nor something to broadcast on a shared vehicle
-# passport, so it's kept in its own local file (like workshop.json),
-# editable/overwritable at will, and never touched by ovpf_cloud.
+# passport, so it's kept in its own local file, editable/overwritable at
+# will, and never touched by ovpf_cloud.
 
 def _vehicle_names_path():
     return os.path.join(paths.data_dir(), "vehicle_names.json")
@@ -137,24 +100,34 @@ def set_vehicle_name(urn, name):
     return names.get(urn)
 
 
-def _producer(base):
-    """Attribute an event to the active workshop profile instead of
-    `base` (PRODUCER/MANUAL), keeping base's other metadata (version,
-    device). Mirrors the cloud providers: once signed in as a workshop,
-    every event logged is attributed to it automatically, not left as an
-    anonymous "Manual"/"Diagnostic" entry -- see
-    viewer/index.html's submitLogEvent."""
-    ws = get_workshop()
-    if not ws:
-        return base
-    producer = dict(base)
-    producer["type"] = "Workshop"
-    producer["name"] = ws["name"]
-    if ws.get("domain"):
-        producer["domain"] = ws["domain"]
+# "Remove from garage" is a hide, not a delete -- the passport itself is a
+# hash-chained diagnostic log (see module docstring's tamper-evidence goal),
+# so unilaterally deleting it on a UI click would be destructive and
+# unrecoverable. Same local-only-JSON pattern as vehicle_names.json, just a
+# set of urns instead of a name map.
+
+def _hidden_vehicles_path():
+    return os.path.join(paths.data_dir(), "hidden_vehicles.json")
+
+
+def _load_hidden_vehicles():
+    try:
+        with open(_hidden_vehicles_path(), encoding="utf-8") as f:
+            return set(json.load(f))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def set_vehicle_hidden(urn, hidden):
+    """Hide (or unhide) a passport urn from the default garage listing."""
+    hidden_set = _load_hidden_vehicles()
+    if hidden:
+        hidden_set.add(urn)
     else:
-        producer.pop("domain", None)
-    return producer
+        hidden_set.discard(urn)
+    with open(_hidden_vehicles_path(), "w", encoding="utf-8") as f:
+        json.dump(sorted(hidden_set), f)
+    return urn in hidden_set
 
 
 def ensure_passport(vin):
@@ -173,7 +146,7 @@ def ensure_passport(vin):
         if vin:
             vehicle["vin"] = vin
         ovpf_core.append(path, ovpf_core.envelope(
-            urn, "PassportOpened", {"vehicle": vehicle}, _producer(MANUAL)))
+            urn, "PassportOpened", {"vehicle": vehicle}, MANUAL))
         return path, urn
 
 
@@ -198,7 +171,7 @@ def record_faults(vin, addr, module_name, faults_result):
             if prev_codes == sorted(c["code"] for c in codes):
                 return None
         return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "DiagnosticTroubleCodeRead", data, _producer(PRODUCER)))
+            urn, "DiagnosticTroubleCodeRead", data, PRODUCER))
 
 
 def record_clear(vin, addr, module_name):
@@ -207,7 +180,7 @@ def record_clear(vin, addr, module_name):
     data = {"module": {"address": f"0x{addr:02X}", "name": module_name},
             "codesCleared": ["*"]}
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "DiagnosticTroubleCodeCleared", data, _producer(PRODUCER)))
+        urn, "DiagnosticTroubleCodeCleared", data, PRODUCER))
 
 
 def record_coding_change(vin, addr, module_name, before, after, preset=None):
@@ -218,7 +191,7 @@ def record_coding_change(vin, addr, module_name, before, after, preset=None):
     if preset:
         data["preset"] = preset
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "EcuCodingChanged", data, _producer(PRODUCER)))
+        urn, "EcuCodingChanged", data, PRODUCER))
 
 
 def record_vehicle_identified(vin, facts):
@@ -234,7 +207,7 @@ def record_vehicle_identified(vin, facts):
         if prev and prev.get("data", {}).get("vehicle", {}) == vehicle:
             return None
         return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "VehicleIdentified", {"vehicle": vehicle}, _producer(PRODUCER)))
+            urn, "VehicleIdentified", {"vehicle": vehicle}, PRODUCER))
 
 
 def record_odometer(vin, value, unit="KMT", source="obd"):
@@ -244,15 +217,14 @@ def record_odometer(vin, value, unit="KMT", source="obd"):
     path, urn = ensure_passport(vin)
     data = {"value": value, "unit": unit, "source": source}
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "OdometerReading", data, _producer(PRODUCER)))
+        urn, "OdometerReading", data, PRODUCER))
 
 
 def record_service(vin, service_type, odometer=None, odometer_unit="KMT",
                     price=None, currency=None, notes=None):
     """Append a `ServicePerformed` -- a manual maintenance fact (oil
-    change, part swap, etc.), producer type Manual (or Workshop, if a
-    local workshop profile is active), not Diagnostic: this didn't come
-    off the ECU, a person is asserting it happened."""
+    change, part swap, etc.), producer type Manual, not Diagnostic: this
+    didn't come off the ECU, a person is asserting it happened."""
     path, urn = ensure_passport(vin)
     data = {"serviceType": service_type}
     if odometer is not None:
@@ -262,7 +234,7 @@ def record_service(vin, service_type, odometer=None, odometer_unit="KMT",
     if notes:
         data["notes"] = notes
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "ServicePerformed", data, _producer(MANUAL)))
+        urn, "ServicePerformed", data, MANUAL))
 
 
 def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
@@ -274,20 +246,30 @@ def record_live_session(vin, channels, sample_rate=None, attachment_ref=None):
     if attachment_ref:
         data["attachmentRef"] = attachment_ref
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "LiveDataRecorded", data, _producer(PRODUCER)))
+        urn, "LiveDataRecorded", data, PRODUCER))
 
 
-def record_dyno_run(vin, peaks, duration_s=None, num=None):
-    """Append a `DynoRun` -- peak power/torque from a detected WOT pull
-    (see diag_ui.py's detect_pull()/PULLS_LOG), producer type Diagnostic
-    since these numbers came straight off the ECU's live channels, not a
-    person's claim. `peaks` is whatever numeric channels were tracked
-    during the pull (channel id -> running max); power_kw/torque_nm map to
-    the spec's power/torque fields when present (only true for the E87's
-    MAF-based estimate today -- other adapters/cars won't have them), and
-    everything else (rpm, maf, speed_kmh, ...) goes under `conditions` for
-    context, same "essentials, not exhaustive" latitude the spec gives
-    every other field here."""
+def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None):
+    """Append a `DynoRun` -- peak power/torque from a detected WOT pull,
+    producer type Diagnostic since these numbers came straight off the
+    ECU's live channels, not a person's claim. `peaks` is whatever numeric
+    channels were tracked during the pull (channel id -> running max);
+    power_kw/torque_nm map to the spec's power/torque fields when present
+    (only true for the MAF-based estimate today -- other adapters/cars
+    won't have them), and everything else (rpm, maf, speed_kmh, ...) goes
+    under `conditions` for context, same "essentials, not exhaustive"
+    latitude the spec gives every other field here.
+
+    `curve_ref` is a plain relative-path string (e.g.
+    "dyno_runs/<uuid>.json", see diag_ui.py's /api/dyno/save) pointing at
+    the full RPM-binned curve, matching the spec's `curveRef` attachment
+    field -- same precedent as record_live_session's attachment_ref, not
+    the spec's full content-addressed attachments system (hashing etc.),
+    which is bigger than this and out of scope here. Callers today are
+    entirely client-driven (ui.html's computeDynoCurve -> POST
+    /api/dyno/save): detect_pull() itself no longer calls this directly,
+    so a pull only gets a DynoRun event once the client has actually
+    computed and saved a curve for it."""
     if not peaks:
         return None
     path, urn = ensure_passport(vin)
@@ -304,8 +286,10 @@ def record_dyno_run(vin, peaks, duration_s=None, num=None):
         data["duration"] = {"value": round(duration_s, 1), "unit": "s"}
     if num is not None:
         data["pullNumber"] = num
+    if curve_ref:
+        data["curveRef"] = curve_ref
     return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "DynoRun", data, _producer(PRODUCER)))
+        urn, "DynoRun", data, PRODUCER))
 
 
 def passport_state(vin):
@@ -369,11 +353,16 @@ def passport_state_by_urn(urn):
     return state
 
 
-def list_passports():
+def list_passports(include_hidden=False):
     """Derived state for every local passport (one per known VIN, plus
     the anonymous "unknown" one if it exists) -- powers the workshop
     garage view: browse every vehicle worked on from this laptop, not
-    just whichever one is currently connected (see _current_vin())."""
+    just whichever one is currently connected (see _current_vin()).
+
+    Hidden vehicles (see set_vehicle_hidden) are left out by default --
+    a "remove from garage" that the workshop view still needs to be able
+    to reveal and undo, so it's a filter here, not a deletion anywhere."""
+    hidden = _load_hidden_vehicles()
     out = []
     for fname in sorted(os.listdir(_passports_dir())):
         if not fname.endswith(".ovpf.ndjson"):
@@ -385,7 +374,11 @@ def list_passports():
         state = ovpf_core.reduce(events)
         state["chain_ok"] = not ovpf_core.verify_chain(events)
         state["passport_urn"] = state.get("passport")
+        is_hidden = state["passport_urn"] in hidden
+        if is_hidden and not include_hidden:
+            continue
         state["name"] = get_vehicle_name(state["passport_urn"])
+        state["hidden"] = is_hidden
         out.append(state)
     return out
 
