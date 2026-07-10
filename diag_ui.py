@@ -919,7 +919,7 @@ INFERRED_CHANNELS = {"power_kw", "torque_nm"}
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
             "lock": threading.Lock()}
 CSV_QUEUE = queue.Queue(maxsize=1000)  # Buffer for CSV writer thread
-PULL_STATE = {"active": False, "counter": 0, "prev_rpm": 0}
+PULL_STATE = {"active": False, "counter": 0, "rpm_history": []}
 PULLS_LOG = []  # finished pulls this session: [{num, t_start, t_end, peaks}]
 
 
@@ -1275,9 +1275,25 @@ def detect_pull(values):
     throttle = values.get("P13") or values.get("throttle") or 0
     rpm = values.get("P8") or values.get("rpm") or 0
 
-    prev_rpm = PULL_STATE["prev_rpm"]
-    PULL_STATE["prev_rpm"] = rpm
-    rpm_increasing = rpm > prev_rpm + 100  # significant increase
+    # rpm_increasing compares against a short rolling time window (~0.6s),
+    # not the single previous sample -- confirmed against a real recorded
+    # E39 WOT pull (1900->6500rpm, throttle pinned >80% throughout) that a
+    # single-sample delta never exceeded ~91rpm, always under the old
+    # ">100rpm since the previous sample" threshold, so detect_pull()
+    # silently never fired for it. That's not the car being slow to spin
+    # up -- DS2's single combined list-read just samples much more densely
+    # than E87's per-PID KWP2000 round trips, so consecutive-sample deltas
+    # during the exact same real acceleration are far smaller. The E87
+    # "worked" by coincidence of being the slower protocol, not because
+    # the heuristic was actually measuring acceleration.
+    now = time.time()
+    hist = PULL_STATE.setdefault("rpm_history", [])
+    hist.append((now, rpm))
+    window_s = 0.6
+    while len(hist) > 1 and now - hist[0][0] > window_s:
+        hist.pop(0)
+    baseline_rpm = hist[0][1]
+    rpm_increasing = rpm > baseline_rpm + 150  # meaningful climb across the window
 
     if PULL_STATE["active"]:
         peaks = PULL_STATE.setdefault("peaks", {})
@@ -1339,7 +1355,7 @@ def record_start():
         f.write("time,epoch,event,pull_id,event_data," + ",".join(ids) + "\n")
         RECORDER.update(on=True, path=path, file=f, count=0, ids=ids)
         # Reset pull state when starting new recording
-        PULL_STATE.update(active=False, counter=0, prev_rpm=0)
+        PULL_STATE.update(active=False, counter=0, rpm_history=[])
         PULLS_LOG.clear()
         return path
 
