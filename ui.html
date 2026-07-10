@@ -483,10 +483,6 @@
         "OIL SERVICE RESET" shows, release, press again to confirm.
       </div>
     </section>
-    <section data-tab="analysis" id="backupsec">
-      <h2>Backup History</h2>
-      <div id="backuplist" class="muted">Connect to view backups.</div>
-    </section>
     <section data-tab="analysis" id="replaysec">
       <h2>Replay Recordings</h2>
       <div id="replaydir" class="muted" style="font-size:11px;margin-bottom:8px">Recordings save to: …</div>
@@ -520,16 +516,9 @@
         <div id="replaytime" style="font-size:11px;color:var(--dim)"></div>
       </div>
       <div class="muted" style="font-size:11px;margin-top:8px">
-        Drag on a chart to select a time range (Grafana-style) — zoom in, or generate a dyno graph from exactly that window.
-      </div>
-      <div id="zoomtoolbar" style="display:none;margin-top:6px;gap:6px;flex-wrap:wrap" class="row">
-        <span id="zoomselinfo" class="muted" style="font-size:11px"></span>
-        <button id="gendyno_btn" style="font-size:11px">🏁 Generate dyno from selection</button>
-      </div>
-      <div class="row" style="gap:6px;margin-top:6px">
-        <button id="zoomin_btn" style="font-size:11px" title="Zoom in">🔍+</button>
-        <button id="zoomout_btn" style="font-size:11px" title="Zoom out">🔍−</button>
-        <button id="resetzoom_btn" style="display:none;font-size:11px">↺ Reset zoom</button>
+        Drag on a chart (in the "Live data" panel, to the right) to select a
+        time range, Grafana-style -- the zoom controls live up there, right
+        above the charts.
       </div>
       <div id="replayevents" style="margin-top:10px"></div>
     </section>
@@ -550,7 +539,7 @@
         <span style="color:#eb6834">┄┄ Torque (Nm, right axis)</span>
       </div>
       <div id="dynolegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;font-size:12px"></div>
-      <button id="dynosave_btn" style="display:none;font-size:11px;margin-top:8px">💾 Save as image</button>
+      <button id="dynosave_btn" style="display:none;font-size:11px;margin-top:8px">📄 Save as PDF (A4)</button>
       <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Past runs — overlay for comparison</h3>
       <div id="dynoruns" class="muted">Connect to a vehicle (or browse one from the Workshop garage) to see past runs.</div>
     </section>
@@ -568,6 +557,16 @@
       </div>
       <div id="codingstatus" class="muted">Select a module to read its coding.</div>
       <div id="codingdata" style="display:none;margin-top:10px"></div>
+    </section>
+    <section data-tab="diagnostics" id="backupsec">
+      <h2>Backup History</h2>
+      <div class="muted" style="font-size:11px;margin-bottom:10px">
+        Every coding write above goes read → backup → write → verify, and
+        auto-rolls back if verification fails -- this is that backup's
+        history. Empty until you've actually changed a coding value; it's
+        your undo trail if a change doesn't do what you expected.
+      </div>
+      <div id="backuplist" class="muted">Connect to view backups.</div>
     </section>
     <section data-tab="service" id="adaptationsec">
       <h2>Adaptations</h2>
@@ -632,7 +631,16 @@
       </div>
       <div id="tilegroups"></div>
       <div class="muted" style="margin-top:8px;font-size:12px">
-        Click a tile to add/remove its graph.
+        Click a tile to add/remove its graph. Drag on a chart to select a
+        time range, Grafana-style -- click jumps the cursor there too.
+      </div>
+      <div id="charttoolbar" class="row" style="gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0">
+        <button id="zoomin_btn" style="font-size:11px" title="Zoom in">🔍+</button>
+        <button id="zoomout_btn" style="font-size:11px" title="Zoom out">🔍−</button>
+        <button id="resetzoom_btn" style="display:none;font-size:11px">↺ Reset zoom</button>
+        <span id="zoomrangeinfo" class="muted" style="font-size:11px"></span>
+        <span id="zoomselinfo" class="muted" style="font-size:11px"></span>
+        <button id="gendyno_btn" style="display:none;font-size:11px">🏁 Generate dyno from selection</button>
       </div>
       <div id="charts"></div>
     </section>
@@ -1500,6 +1508,20 @@ function jumpToEvent(evt) {
   }
 }
 
+// Click-on-chart equivalent of jumpToEvent -- nearest row to an arbitrary
+// clicked time, not just one of the pull_start/pull_end event markers.
+function jumpToTime(t) {
+  if (!replayData || !replayData.rows.length) return;
+  if (replayPlaying) pauseReplay();
+  let best = 0, bestDiff = Infinity;
+  for (let i = 0; i < replayData.rows.length; i++) {
+    const diff = Math.abs(replayData.rows[i].epoch - t);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  replayIndex = best;
+  updateReplayFrame();
+}
+
 function playReplay() {
   if (!replayData) return;
   replayPlaying = true;
@@ -2112,6 +2134,7 @@ function redraw() {
     const cv = $("chart_" + id);
     if (cv) drawChart(cv, hist[id] || [], id, viewDomain);
   }
+  updateZoomToolbar();
 }
 
 // HH:MM:SS for most views; adds tenths once a chart is zoomed tight enough
@@ -2217,7 +2240,8 @@ function drawChart(cv, pts, id, vd) {
     ctx.fill();
     const ch = chanById(id);
     const unit = ch && ch.unit ? " " + ch.unit : "";
-    const text = np.v.toFixed(Math.abs(hi - lo) < 20 ? 2 : 1) + unit;
+    const text = np.v.toFixed(Math.abs(hi - lo) < 20 ? 2 : 1) + unit
+               + "  " + formatTickTime(np.t, span);
     ctx.font = `${11 * devicePixelRatio}px ui-monospace`;
     const tw = ctx.measureText(text).width;
     const pad2 = 4 * devicePixelRatio;
@@ -2242,16 +2266,32 @@ function xToT(e, target) {
 }
 
 function updateZoomToolbar() {
-  const bar = $("zoomtoolbar");
-  if (!bar) return;
-  if (selRange) {
-    bar.style.display = "flex";
-    $("zoomselinfo").textContent = `${(selRange.t1 - selRange.t0).toFixed(1)}s selected`;
-  } else {
-    bar.style.display = "none";
-  }
   const rz = $("resetzoom_btn");
   if (rz) rz.style.display = viewDomain ? "" : "none";
+
+  const selInfo = $("zoomselinfo");
+  if (selInfo) selInfo.textContent = selRange ? `${(selRange.t1 - selRange.t0).toFixed(1)}s selected` : "";
+
+  // Only meaningful with a loaded recording to slice a curve out of.
+  const gd = $("gendyno_btn");
+  if (gd) gd.style.display = (selRange && replayData) ? "" : "none";
+
+  // Grafana-style current-range readout, above the charts alongside the
+  // zoom controls -- reflects the pinned viewDomain when zoomed, or the
+  // live rolling window otherwise.
+  const rangeInfo = $("zoomrangeinfo");
+  if (rangeInfo) {
+    let domain = viewDomain;
+    if (!domain) {
+      for (const id of charted) {
+        const pts = hist[id];
+        if (pts && pts.length >= 2) { domain = getDomain(pts, null); break; }
+      }
+    }
+    rangeInfo.textContent = domain
+      ? `${formatTickTime(domain.t0, domain.t1 - domain.t0)} – ${formatTickTime(domain.t1, domain.t1 - domain.t0)}`
+      : "";
+  }
 }
 
 $("charts").addEventListener("mousedown", e => {
@@ -2278,7 +2318,7 @@ $("charts").addEventListener("mousemove", e => {
   const t = xToT(e, e.target);
   if (t != null) { hoverT = t; redraw(); }
 });
-$("charts").addEventListener("mouseup", () => {
+$("charts").addEventListener("mouseup", e => {
   // Grafana-style: a completed drag zooms immediately, no separate
   // "confirm zoom" click needed. viewDomain takes the *same* selRange
   // object (not a copy) so drawChart's selection-highlight can tell "this
@@ -2288,6 +2328,11 @@ $("charts").addEventListener("mouseup", () => {
     viewDomain = selRange;
     updateZoomToolbar();
     redraw();
+  } else if (isMouseDown && e.target.tagName === "CANVAS" && replayData) {
+    // A plain click (no drag) in Replay: jump the playhead/scrub position
+    // to exactly this time, not just the transient hover crosshair.
+    const t = xToT(e, e.target);
+    if (t != null) jumpToTime(t);
   }
   isMouseDown = false;
   selecting = false;
@@ -2561,11 +2606,17 @@ function activeDynoCurves() {
   return out;
 }
 
-function drawDynoChart(cv, curves) {
+function drawDynoChart(cv, curves, opts) {
+  opts = opts || {};
   const ctx = cv.getContext("2d");
-  const W = cv.width = cv.clientWidth * devicePixelRatio;
-  const H = cv.height = 280 * devicePixelRatio;
+  const dpr = opts.dpr || devicePixelRatio;
+  const W = cv.width = (opts.width || cv.clientWidth) * dpr;
+  const H = cv.height = (opts.height || 280) * dpr;
   ctx.clearRect(0, 0, W, H);
+  // Print export wants a white page, not the app's dark theme -- printing
+  // dark-gray-on-near-black gridlines/text would be near-invisible on
+  // paper and waste a lot of ink/toner on the fill itself.
+  if (opts.light) { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H); }
   const allBins = curves.flatMap(c => c.curve.bins);
   if (!allBins.length) return;
   const rpmMin = Math.min(...allBins.map(b => b.rpm));
@@ -2579,29 +2630,29 @@ function drawDynoChart(cv, curves) {
   tHi += (tHi - tLo) * 0.1 || 1;
 
   const powerColor = "#4da3ff", torqueColor = "#eb6834";
-  ctx.strokeStyle = "#313945"; ctx.lineWidth = 1;
-  ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+  ctx.strokeStyle = opts.light ? "#d8dce2" : "#313945"; ctx.lineWidth = 1;
+  ctx.font = `${10 * dpr}px ui-monospace`;
   for (let i = 0; i <= 3; i++) {
     const y = H * i / 3;
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
     ctx.fillStyle = powerColor;
-    ctx.fillText((pHi - (pHi - pLo) * i / 3).toFixed(0), 4 * devicePixelRatio, y + 12 * devicePixelRatio);
+    ctx.fillText((pHi - (pHi - pLo) * i / 3).toFixed(0), 4 * dpr, y + 12 * dpr);
     const tText = (tHi - (tHi - tLo) * i / 3).toFixed(0);
     ctx.fillStyle = torqueColor;
-    ctx.fillText(tText, W - ctx.measureText(tText).width - 4 * devicePixelRatio, y + 12 * devicePixelRatio);
+    ctx.fillText(tText, W - ctx.measureText(tText).width - 4 * dpr, y + 12 * dpr);
   }
-  ctx.fillStyle = "#8b97a5";
+  ctx.fillStyle = opts.light ? "#5a6472" : "#8b97a5";
   for (let i = 0; i <= 4; i++) {
     const rpm = Math.round(rpmMin + rpmSpan * i / 4);
-    const x = Math.min(W - 30 * devicePixelRatio, Math.max(20 * devicePixelRatio, W * i / 4));
-    ctx.fillText(rpm, x, H - 4 * devicePixelRatio);
+    const x = Math.min(W - 30 * dpr, Math.max(20 * dpr, W * i / 4));
+    ctx.fillText(rpm, x, H - 4 * dpr);
   }
 
   for (const c of curves) {
     const bins = c.curve.bins;
     const line = (getVal, lo, hi, dash) => {
-      ctx.strokeStyle = c.color; ctx.lineWidth = 2 * devicePixelRatio;
-      ctx.setLineDash(dash ? [6 * devicePixelRatio, 3 * devicePixelRatio] : []);
+      ctx.strokeStyle = c.color; ctx.lineWidth = 2 * dpr;
+      ctx.setLineDash(dash ? [6 * dpr, 3 * dpr] : []);
       ctx.beginPath();
       bins.forEach((b, i) => {
         const x = (b.rpm - rpmMin) / rpmSpan * W;
@@ -2642,17 +2693,88 @@ function updateDynoChart() {
   if (lineLegend) lineLegend.style.display = curves.length ? "flex" : "none";
 }
 
-// Exports dynochart as a PNG "dyno sheet" -- the on-screen canvas is only
-// ever cleared (transparent), fine over the dark page background, but a
-// bare toDataURL() would produce a floating, illegible-on-white line chart.
-// Redraw onto a taller offscreen canvas with a solid panel fill, a header
-// (vehicle info + date) and a footer (peak power/torque @ rpm per curve),
-// so the saved file reads as a standalone result, the way a real dyno
-// printout would, not just a cropped screenshot of the app.
+// ---- Minimal single-page PDF writer (no external library, no CDN --
+// matches this project's stdlib-only/offline-first philosophy). Just
+// enough of the PDF object model -- Catalog/Pages/Page/content-stream/two
+// base14 fonts (no embedding needed for Helvetica)/one image XObject -- to
+// emit a print-ready A4 page. PDF structure is ASCII; the only binary
+// payload is the chart's JPEG, embedded as-is (DCTDecode needs no
+// re-encoding). Coordinates passed to the helpers below are "visual"
+// top-down (like canvas), flipped to PDF's bottom-up space internally.
+function pdfColor(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]
+    .map(v => v.toFixed(3)).join(" ");
+}
+function pdfEscape(s) {
+  return String(s).replace(/[\\()]/g, c => "\\" + c);
+}
+function dataUrlToBytes(dataUrl) {
+  const bin = atob(dataUrl.split(",")[1]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+function buildA4Pdf(ops, image) {
+  const pageW = 595.28, pageH = 841.89; // A4 in points (72/in)
+  const enc = new TextEncoder();
+  const chunks = [];
+  let offset = 0;
+  const objOffsets = {};
+  const push = part => {
+    const bytes = typeof part === "string" ? enc.encode(part) : part;
+    chunks.push(bytes);
+    offset += bytes.length;
+  };
+  const beginObj = n => { objOffsets[n] = offset; push(`${n} 0 obj\n`); };
+
+  const contentBytes = enc.encode(ops.join("\n") + "\n");
+
+  push("%PDF-1.4\n");
+  beginObj(1); push("<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+  beginObj(2); push("<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+  beginObj(3);
+  push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] ` +
+       `/Resources << /Font << /F1 5 0 R /F2 6 0 R >>` +
+       (image ? " /XObject << /Im0 7 0 R >>" : "") + ` >> /Contents 4 0 R >>\nendobj\n`);
+  beginObj(4);
+  push(`<< /Length ${contentBytes.length} >>\nstream\n`);
+  push(contentBytes);
+  push("\nendstream\nendobj\n");
+  beginObj(5); push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
+  beginObj(6); push("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n");
+  let numObjs = 6;
+  if (image) {
+    beginObj(7);
+    push(`<< /Type /XObject /Subtype /Image /Width ${image.pxW} /Height ${image.pxH} ` +
+         `/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${image.bytes.length} >>\nstream\n`);
+    push(image.bytes);
+    push("\nendstream\nendobj\n");
+    numObjs = 7;
+  }
+
+  const xrefOffset = offset;
+  let xref = `xref\n0 ${numObjs + 1}\n0000000000 65535 f \n`;
+  for (let i = 1; i <= numObjs; i++) xref += String(objOffsets[i]).padStart(10, "0") + " 00000 n \n";
+  push(xref);
+  push(`trailer\n<< /Size ${numObjs + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const out = new Uint8Array(total);
+  let p = 0;
+  for (const c of chunks) { out.set(c, p); p += c.length; }
+  return { bytes: out, pageW, pageH };
+}
+
+// Exports the dyno curve as a printable A4 PDF: real (crisp, small-file)
+// Helvetica text for the title/vehicle info/legend/peak values, with just
+// the RPM/power/torque line chart itself embedded as an image (the one
+// part that's genuinely raster line art). White background, not the app's
+// dark theme -- a printed dark-background chart would waste a lot of
+// ink/toner and look wrong on paper.
 async function saveDynoImage() {
-  const cv = $("dynochart");
   const curves = activeDynoCurves();
-  if (!cv || !curves.length) return;
+  if (!curves.length) return;
 
   let vehicleLine = "";
   if (state.connected) {
@@ -2665,19 +2787,8 @@ async function saveDynoImage() {
     } catch (e) { /* export still works without vehicle info */ }
   }
   if (!vehicleLine && state.vin) vehicleLine = state.vin;
+  const dateLine = `Generated ${new Date().toLocaleString()} -- estimated from MAF, not a real dyno`;
 
-  const dpr = devicePixelRatio || 1;
-  const pad = 16 * dpr;
-  const headerH = (vehicleLine ? 90 : 72) * dpr;
-  const labelFont = `bold ${13 * dpr}px ui-monospace`;
-  const valueFont = `${12 * dpr}px ui-monospace`;
-  const rowH = 20 * dpr, rowGap = 8 * dpr;
-  const dateLine = `Generated ${new Date().toLocaleString()} — estimated from MAF, not a real dyno`;
-
-  // One label line + one values line per curve, "Label" / "XX.X kW @ rpm
-  // rpm  /  XX.X Nm @ rpm rpm (note)" -- splitting them (rather than one
-  // long combined line) keeps each line short enough to fit a narrow chart
-  // without shrinking the font to the point of being unreadable.
   const footerLines = curves.map(c => {
     const pk = c.curve.peaks;
     const pw = pk.power_kw_corrected ?? pk.power_kw;
@@ -2690,96 +2801,73 @@ async function saveDynoImage() {
       value: `${pw.toFixed(1)} kW @ ${pk.power_kw_rpm} rpm  /  ${tq.toFixed(1)} Nm @ ${pk.torque_nm_rpm} rpm${corrNote}`,
     };
   });
-  const footerH = (20 * dpr) + curves.length * (rowH * 2 + rowGap);
 
-  // Measure every line that'll be drawn up front and size the sheet to fit
-  // the widest one -- a long saved-run label or correction note must widen
-  // the canvas, not silently run off its right edge (the bug this replaced:
-  // a fixed chart-width canvas clipped the peak-values line entirely).
-  const mctx = document.createElement("canvas").getContext("2d");
-  let maxLineW = 0;
-  const measure = (font, text) => {
-    mctx.font = font;
-    maxLineW = Math.max(maxLineW, mctx.measureText(text).width);
+  const margin = 42;
+  const contentW = 595.28 - margin * 2;
+  const ops = [];
+  const addText = (x, yTop, str, { size = 10, bold = false, color = "#1a1a1a" } = {}) => {
+    ops.push(`BT /${bold ? "F2" : "F1"} ${size} Tf ${pdfColor(color)} rg 1 0 0 1 ${x.toFixed(2)} ${(841.89 - yTop).toFixed(2)} Tm (${pdfEscape(str)}) Tj ET`);
   };
-  measure(`bold ${17 * dpr}px ui-monospace`, "VIRTUAL DYNO");
-  if (vehicleLine) measure(`${12 * dpr}px ui-monospace`, vehicleLine);
-  measure(`${11 * dpr}px ui-monospace`, dateLine);
-  mctx.font = `${11 * dpr}px ui-monospace`;
-  const lineLegendW = 28 * dpr + mctx.measureText("Power (kW)").width + 24 * dpr
-                     + 28 * dpr + mctx.measureText("Torque (Nm)").width;
-  maxLineW = Math.max(maxLineW, lineLegendW);
-  for (const l of footerLines) {
-    measure(labelFont, l.label);
-    measure(valueFont, l.value);
-  }
-  const indent = 14 * dpr;
-  const outW = Math.max(cv.width, maxLineW + indent) + pad * 2;
+  const addRect = (x, yTop, w, h, color) => {
+    ops.push(`${pdfColor(color)} rg ${x.toFixed(2)} ${(841.89 - yTop - h).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re f`);
+  };
+  const addLine = (x0, yTop, x1, color, width, dashed) => {
+    ops.push(`q ${pdfColor(color)} RG ${width} w ${dashed ? "[4 2] 0 d" : ""} ${x0.toFixed(2)} ${(841.89 - yTop).toFixed(2)} m ${x1.toFixed(2)} ${(841.89 - yTop).toFixed(2)} l S Q`);
+  };
+  // Approximate Helvetica metrics via a scratch canvas -- close enough for
+  // layout spacing (e.g. placing "Torque (Nm)" after "Power (kW)"); it
+  // doesn't need to be exact since nothing here depends on pixel-perfect
+  // text measurement, only reasonable gaps between elements.
+  const mctx = document.createElement("canvas").getContext("2d");
+  const textW = (str, size, bold) => {
+    mctx.font = `${bold ? "bold " : ""}${size}px Arial, Helvetica, sans-serif`;
+    return mctx.measureText(str).width;
+  };
 
-  const out = document.createElement("canvas");
-  out.width = outW;
-  out.height = headerH + cv.height + footerH + pad * 2;
-  const ctx = out.getContext("2d");
-
-  ctx.fillStyle = "#242a34";
-  ctx.fillRect(0, 0, out.width, out.height);
-
-  ctx.fillStyle = "#dfe6ee";
-  ctx.font = `bold ${17 * dpr}px ui-monospace`;
-  ctx.fillText("VIRTUAL DYNO", pad, pad + 18 * dpr);
-  let y = pad + 36 * dpr;
-  if (vehicleLine) {
-    ctx.fillStyle = "#c3cad4";
-    ctx.font = `${12 * dpr}px ui-monospace`;
-    ctx.fillText(vehicleLine, pad, y);
-    y += 18 * dpr;
-  }
-  ctx.fillStyle = "#8b97a5";
-  ctx.font = `${11 * dpr}px ui-monospace`;
-  ctx.fillText(dateLine, pad, y);
-  y += 24 * dpr;
+  let y = margin + 20;
+  addText(margin, y, "VIRTUAL DYNO", { size: 20, bold: true });
+  y += 22;
+  if (vehicleLine) { addText(margin, y, vehicleLine, { size: 11, color: "#444444" }); y += 16; }
+  addText(margin, y, dateLine, { size: 9, color: "#777777" });
+  y += 22;
 
   // Line-style legend -- solid=Power/dashed=Torque applies to every curve
-  // regardless of its color, so this is drawn once, separately from the
-  // per-run color legend in the footer below.
-  ctx.lineWidth = 2 * dpr;
-  ctx.strokeStyle = "#4da3ff";
-  ctx.beginPath(); ctx.moveTo(pad, y - 4 * dpr); ctx.lineTo(pad + 22 * dpr, y - 4 * dpr); ctx.stroke();
-  ctx.fillStyle = "#4da3ff";
-  ctx.font = `${11 * dpr}px ui-monospace`;
-  ctx.fillText("Power (kW)", pad + 28 * dpr, y);
-  const tqLegendX = pad + 28 * dpr + ctx.measureText("Power (kW)").width + 24 * dpr;
-  ctx.strokeStyle = "#eb6834";
-  ctx.setLineDash([5 * dpr, 3 * dpr]);
-  ctx.beginPath(); ctx.moveTo(tqLegendX, y - 4 * dpr); ctx.lineTo(tqLegendX + 22 * dpr, y - 4 * dpr); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.fillStyle = "#eb6834";
-  ctx.fillText("Torque (Nm)", tqLegendX + 28 * dpr, y);
+  // regardless of its color, drawn once rather than per curve.
+  addLine(margin, y - 4, margin + 20, "#4da3ff", 2, false);
+  addText(margin + 26, y, "Power (kW)", { size: 9, color: "#2a6bb0" });
+  const tqX = margin + 26 + textW("Power (kW)", 9, false) + 20;
+  addLine(tqX, y - 4, tqX + 20, "#eb6834", 2, true);
+  addText(tqX + 26, y, "Torque (Nm)", { size: 9, color: "#a34a1f" });
+  y += 20;
 
-  ctx.drawImage(cv, pad, headerH + pad);
+  // Chart -- rendered fresh at print resolution (not just reusing the
+  // on-screen canvas), white background, high dpr for a crisp printed
+  // line at A4 size instead of an upscaled/blurry on-screen capture.
+  const chartCssW = contentW, chartCssH = contentW * (280 / 660);
+  const chartCanvas = document.createElement("canvas");
+  drawDynoChart(chartCanvas, curves, { light: true, width: chartCssW, height: chartCssH, dpr: 3 });
+  const jpegBytes = dataUrlToBytes(chartCanvas.toDataURL("image/jpeg", 0.92));
+  ops.push(`q ${chartCssW.toFixed(2)} 0 0 ${chartCssH.toFixed(2)} ${margin.toFixed(2)} ${(841.89 - y - chartCssH).toFixed(2)} cm /Im0 Do Q`);
+  y += chartCssH + 20;
 
-  let fy = headerH + pad + cv.height + 20 * dpr;
-  ctx.font = `${10 * dpr}px ui-monospace`;
-  ctx.fillStyle = "#8b97a5";
-  ctx.fillText("PEAK VALUES", pad, fy);
-  fy += rowH + rowGap;
+  addText(margin, y, "PEAK VALUES", { size: 9, bold: true, color: "#888888" });
+  y += 18;
   for (const l of footerLines) {
-    ctx.fillStyle = l.color;
-    ctx.fillRect(pad, fy - 9 * dpr, 9 * dpr, 9 * dpr);
-    ctx.fillStyle = "#dfe6ee";
-    ctx.font = labelFont;
-    ctx.fillText(l.label, pad + indent, fy);
-    fy += rowH;
-    ctx.fillStyle = "#c3cad4";
-    ctx.font = valueFont;
-    ctx.fillText(l.value, pad + indent, fy);
-    fy += rowH + rowGap;
+    addRect(margin, y - 9, 9, 9, l.color);
+    addText(margin + 16, y, l.label, { size: 11, bold: true });
+    y += 15;
+    addText(margin + 16, y, l.value, { size: 10, color: "#444444" });
+    y += 20;
   }
 
+  const pdf = buildA4Pdf(ops, { bytes: jpegBytes, pxW: chartCanvas.width, pxH: chartCanvas.height });
+  const blob = new Blob([pdf.bytes], { type: "application/pdf" });
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.download = `dyno_${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
-  a.href = out.toDataURL("image/png");
+  a.download = `dyno_${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
+  a.href = url;
   a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 $("dynosave_btn")?.addEventListener("click", saveDynoImage);
 
@@ -2905,6 +2993,14 @@ $("livebtn").onclick = () => {
   if (es) { es.close(); es = null;
     $("livebtn").textContent = "Start live";
     $("livestat").textContent = "stopped"; return; }
+  // A Replay session (or a zoom on a live chart) can leave viewDomain
+  // pinned to an old, fixed time range -- e.g. a loaded recording's own
+  // epoch, nowhere near "now". Left in place, every fresh live sample gets
+  // filtered out by drawChart's domain check (outside [t0,t1]) and the
+  // chart just stays empty. Starting live always means "show me the
+  // rolling live window", so clear the pin unconditionally here.
+  viewDomain = null; selRange = null; playheadT = null;
+  updateZoomToolbar();
   // Fresh min/max for this session -- a stale peak from an earlier pull
   // would be misleading to see next to a brand new one.
   for (const k of Object.keys(stats)) delete stats[k];
@@ -3725,7 +3821,31 @@ function showTab(name) {
     sec.classList.toggle("tabhide", sec.dataset.tab !== name));
   if (name === "passport") loadPassport();
   if (name === "workshop") loadWorkshop();
-  if (name === "analysis") { loadDynoRuns(); loadRecordingsPicker(); }
+  if (name === "analysis") {
+    loadDynoRuns(); loadRecordingsPicker();
+    // Restore the loaded recording's own static view (see the else branch
+    // below, which clears it on the way out to a different tab) --
+    // otherwise Replay would look "live" instead of showing its own
+    // timeline when you switch back to it.
+    if (replayData && replayData.rows.length && !viewDomain) {
+      viewDomain = { t0: replayData.rows[0].epoch, t1: replayData.rows[replayData.rows.length - 1].epoch };
+      playheadT = replayData.rows[replayIndex] ? replayData.rows[replayIndex].epoch : viewDomain.t0;
+      updateZoomToolbar();
+      redraw();
+    }
+  } else if (replayData) {
+    // The charts (right column) are always visible regardless of which
+    // left-nav tab is active -- they're not scoped to "analysis". A loaded
+    // recording pins viewDomain/playheadT to its own old epoch, which
+    // would otherwise follow the user to every other tab and hide live
+    // data (filtered out by drawChart's domain check) even while
+    // streaming continues in the background. Leaving Analysis with a
+    // recording loaded drops back to the live rolling view; Replay itself
+    // still works fine if you switch back.
+    viewDomain = null; selRange = null; playheadT = null;
+    updateZoomToolbar();
+    redraw();
+  }
 }
 
 // ---- Vehicle Passport (replay the local event log into a story) ----

@@ -1167,8 +1167,14 @@ def detect_pull(values):
     here -- found empirically that throttle sustains ~90-100% while load is
     still ramping from ~20% to 70%+ over several seconds, so requiring
     load>70 at the start missed the first few seconds of a real WOT pull).
-    End: throttle < 60% OR load < 50% (hysteresis to avoid flicker) --
-    load still gates the end condition, only the start got loosened.
+    End: throttle < 60% alone -- load used to also gate this (`or load <
+    50`), but a real logged pull showed why that's wrong: load can still be
+    climbing from ~20% past 50% several seconds into a pull with throttle
+    already pinned at 100%, so "load < 50" kept firing on nearly every
+    sample during that ramp-up and fragmented one continuous pull into six
+    separate start/end pairs, each ending the instant it began. Load lags
+    throttle by design (intake/turbo dynamics); throttle position alone is
+    the reliable "did the driver lift off" signal.
 
     While a pull is active, tracks the running peak of every numeric channel
     (not just throttle/load/rpm) so that e.g. peak power_kw/torque_nm/maf are
@@ -1183,11 +1189,10 @@ def detect_pull(values):
     Returns: ("start", pull_number) | ("end", pull_number) | None
     """
     # Extract values, handling different param IDs across profiles (E39 DS2
-    # MS41 profiles use P8/P13/E2; the E87 KWP2000 channels use the plain
+    # MS41 profiles use P8/P13; the E87 KWP2000 channels use the plain
     # names -- same fallback pattern already used elsewhere in this file,
     # e.g. record_row()'s gear estimate and evaluate_health()).
     throttle = values.get("P13") or values.get("throttle") or 0
-    load = values.get("E2") or values.get("engine_load") or 0
     rpm = values.get("P8") or values.get("rpm") or 0
 
     prev_rpm = PULL_STATE["prev_rpm"]
@@ -1209,8 +1214,9 @@ def detect_pull(values):
             PULL_STATE["t_start"] = time.time()
             return ("start", PULL_STATE["counter"])
     else:
-        # Check for pull end (hysteresis)
-        if throttle < 60 or load < 50:
+        # Check for pull end -- throttle alone, see docstring for why load
+        # was dropped from this condition.
+        if throttle < 60:
             PULL_STATE["active"] = False
             t_start = PULL_STATE.get("t_start")
             t_end = time.time()
