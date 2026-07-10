@@ -674,7 +674,7 @@ let replayTimer = null;
 let replaySpeed = 1.0;
 
 // Parameter label mapping for replay mode
-const PARAM_LABELS = {"P13": {"label": "TPS", "unit": "%"}, "E2": {"label": "Load", "unit": "mg/stroke"}, "P21": {"label": "IPW", "unit": "ms"}, "E13": {"label": "STFT1", "unit": "%"}, "E14": {"label": "STFT2", "unit": "%"}, "E15": {"label": "O2 Heater - Front #1", "unit": "%"}, "E16": {"label": "O2 Heater - Front #2", "unit": "%"}, "E19": {"label": "IdleFT1", "unit": "ms"}, "E20": {"label": "IdleFT2", "unit": "ms"}, "E21": {"label": "LTFT1", "unit": "%"}, "E22": {"label": "LTFT2", "unit": "%"}, "P8": {"label": "RPM", "unit": "RPM"}, "P9": {"label": "Speed", "unit": "km/h"}, "E11": {"label": "VANOS", "unit": "°"}, "E217": {"label": "Knock", "unit": "°"}, "P11": {"label": "IAT", "unit": "°C"}, "P2": {"label": "ECT", "unit": "°C"}, "P10": {"label": "IGN", "unit": "°BTDC"}, "E23": {"label": "TPS Adapt", "unit": "%"}, "E24": {"label": "Knock Global", "unit": "°"}, "E99": {"label": "Knock Adapt", "unit": "°"}, "E100": {"label": "IAT V", "unit": "V"}, "E101": {"label": "O2 #1 V", "unit": "V"}, "E102": {"label": "O2 #2 V", "unit": "V"}, "E103": {"label": "ECT V", "unit": "V"}, "P19": {"label": "TPS V", "unit": "V"}, "E105": {"label": "ZSR V", "unit": "V"}, "P18": {"label": "MAF V", "unit": "V"}, "P17": {"label": "Battery", "unit": "V"}, "E123": {"label": "Knock #1 V", "unit": "V"}, "E124": {"label": "Knock #2 V", "unit": "V"}, "E127": {"label": "Tank P V", "unit": "V"}, "P12": {"label": "MAF", "unit": "kg/h"}, "E9": {"label": "IACV", "unit": "%"}, "E201": {"label": "IACV AlphaN", "unit": "%"}, "E202": {"label": "Evap PWM", "unit": "%"}, "E204": {"label": "Knock Cyl 1", "unit": ""}, "E205": {"label": "Knock Cyl 2", "unit": ""}, "E206": {"label": "Knock Cyl 3", "unit": ""}, "E207": {"label": "Knock Cyl 4", "unit": ""}, "E208": {"label": "Knock Cyl 5", "unit": ""}, "E209": {"label": "Knock Cyl 6", "unit": ""}, "E210": {"label": "VANOS Angle", "unit": ""}, "P24": {"label": "Atm Press", "unit": "psi"}, "E203": {"label": "Load SW", "unit": ""}, "S0": {"label": "A/C Comp", "unit": ""}, "S1": {"label": "A/C High", "unit": ""}, "S2": {"label": "Theft", "unit": ""}, "S3": {"label": "Gear Shift", "unit": ""}, "S4": {"label": "Drag Torque", "unit": ""}, "S5": {"label": "Torque Req", "unit": ""}, "S6": {"label": "Full Load", "unit": ""}, "S7": {"label": "Part Load", "unit": ""}, "S8": {"label": "Closed Throttle", "unit": ""}, "S9": {"label": "REG2", "unit": ""}, "S10": {"label": "REG1", "unit": ""}, "S11": {"label": "DFCO", "unit": ""}, "S12": {"label": "Accel", "unit": ""}, "S13": {"label": "Start", "unit": ""}, "S14": {"label": "Drive", "unit": ""}, "S15": {"label": "Generator", "unit": ""}, "S16": {"label": "CAN", "unit": ""}, "S22": {"label": "Exhaust", "unit": ""}, "S23": {"label": "VANOS SW", "unit": ""}, "S24": {"label": "Comp Relay", "unit": ""}, "S25": {"label": "Fuel Pump", "unit": ""}};
+const PARAM_LABELS = {"P13": {"label": "TPS", "unit": "%"}, "E2": {"label": "Load", "unit": "mg/stroke"}, "P21": {"label": "IPW", "unit": "ms"}, "E13": {"label": "STFT1", "unit": "%"}, "E14": {"label": "STFT2", "unit": "%"}, "E15": {"label": "O2 Heater - Front #1", "unit": "%"}, "E16": {"label": "O2 Heater - Front #2", "unit": "%"}, "E19": {"label": "IdleFT1", "unit": "ms"}, "E20": {"label": "IdleFT2", "unit": "ms"}, "E21": {"label": "LTFT1", "unit": "%"}, "E22": {"label": "LTFT2", "unit": "%"}, "P8": {"label": "RPM", "unit": "RPM"}, "P9": {"label": "Speed", "unit": "km/h"}, "E11": {"label": "VANOS", "unit": "°"}, "E217": {"label": "Knock", "unit": "°"}, "P11": {"label": "IAT", "unit": "°C"}, "P2": {"label": "ECT", "unit": "°C"}, "P10": {"label": "IGN", "unit": "°BTDC"}, "E23": {"label": "TPS Adapt", "unit": "%"}, "E24": {"label": "Knock Global", "unit": "°"}, "E99": {"label": "Knock Adapt", "unit": "°"}, "E100": {"label": "IAT V", "unit": "V"}, "E101": {"label": "O2 #1 V", "unit": "V"}, "E102": {"label": "O2 #2 V", "unit": "V"}, "E103": {"label": "ECT V", "unit": "V"}, "P19": {"label": "TPS V", "unit": "V"}, "E105": {"label": "ZSR V", "unit": "V"}, "P18": {"label": "MAF V", "unit": "V"}, "P17": {"label": "Battery", "unit": "V"}, "E123": {"label": "Knock #1 V", "unit": "V"}, "E124": {"label": "Knock #2 V", "unit": "V"}, "E127": {"label": "Tank P V", "unit": "V"}, "P12": {"label": "MAF", "unit": "kg/h"}, "E9": {"label": "IACV", "unit": "%"}, "E201": {"label": "IACV AlphaN", "unit": "%"}, "E202": {"label": "Evap PWM", "unit": "%"}, "E204": {"label": "Knock Cyl 1", "unit": ""}, "E205": {"label": "Knock Cyl 2", "unit": ""}, "E206": {"label": "Knock Cyl 3", "unit": ""}, "E207": {"label": "Knock Cyl 4", "unit": ""}, "E208": {"label": "Knock Cyl 5", "unit": ""}, "E209": {"label": "Knock Cyl 6", "unit": ""}, "E210": {"label": "VANOS Angle", "unit": ""}, "P24": {"label": "Atm Press", "unit": "psi"}, "E203": {"label": "Load SW", "unit": ""}, "S0": {"label": "A/C Comp", "unit": ""}, "S1": {"label": "A/C High", "unit": ""}, "S2": {"label": "Theft", "unit": ""}, "S3": {"label": "Gear Shift", "unit": ""}, "S4": {"label": "Drag Torque", "unit": ""}, "S5": {"label": "Torque Req", "unit": ""}, "S6": {"label": "Full Load", "unit": ""}, "S7": {"label": "Part Load", "unit": ""}, "S8": {"label": "Closed Throttle", "unit": ""}, "S9": {"label": "REG2", "unit": ""}, "S10": {"label": "REG1", "unit": ""}, "S11": {"label": "DFCO", "unit": ""}, "S12": {"label": "Accel", "unit": ""}, "S13": {"label": "Start", "unit": ""}, "S14": {"label": "Drive", "unit": ""}, "S15": {"label": "Generator", "unit": ""}, "S16": {"label": "CAN", "unit": ""}, "S22": {"label": "Exhaust", "unit": ""}, "S23": {"label": "VANOS SW", "unit": ""}, "S24": {"label": "Comp Relay", "unit": ""}, "S25": {"label": "Fuel Pump", "unit": ""}, "power_kw": {"label": "Est. Crank Power", "unit": "kW"}, "torque_nm": {"label": "Est. Crank Torque", "unit": "Nm"}};
 
 async function api(path, body) {
   // Custom header on every call (see diag_ui.py's _csrf_ok): forces a CORS
@@ -1373,7 +1373,7 @@ function loadReplayFile(file) {
 // Shared by both load paths: an OS file-picker (loadReplayFile, above) and
 // the server-backed picker (loadReplayFromServer, below) -- same DATA dir
 // the recorder writes drive_log_*.csv into (see /api/recordings/dir).
-function loadReplayText(text) {
+async function loadReplayText(text) {
     const parsed = parseCSV(text);
     if (!parsed) {
       $('replaystatus').textContent = 'Failed to parse CSV file';
@@ -1384,8 +1384,40 @@ function loadReplayText(text) {
     replayIndex = 0;
     replayPlaying = false;
 
+    // Older recordings predate power_kw/torque_nm as recorded columns --
+    // reconstruct them from maf+rpm here (same formula/constant-resolution
+    // computeDynoCurve already uses for this exact case) so Replay's own
+    // tiles/charts show them too, not just a Dyno-tab curve generated from
+    // a selection. Without this, an old CSV just silently has no kW/Nm
+    // anywhere in Replay.
+    let header = parsed.header;
+    if (!header.includes('power_kw') && !header.includes('torque_nm')) {
+      const hasRpm = header.includes('rpm') || header.includes('P8');
+      const hasMaf = header.includes('maf') || header.includes('P12');
+      if (hasRpm && hasMaf) {
+        const k = await resolvePowerConstant(null, null);
+        if (k != null) {
+          for (const row of parsed.rows) {
+            const rpm = row.values.rpm ?? row.values.P8;
+            const mafRaw = row.values.maf ?? row.values.P12;
+            if (rpm == null || mafRaw == null || rpm <= 50) continue;
+            // P12 (E39) is kg/h and needs the g/s conversion; E87's plain
+            // "maf" is already g/s -- same distinction as normalizeSample.
+            const maf_gps = row.values.P12 != null ? mafRaw * 1000 / 3600 : mafRaw;
+            const power_kw = maf_gps * k;
+            row.values.power_kw = power_kw;
+            row.values.torque_nm = power_kw * 1000 / (rpm * 2 * Math.PI / 60);
+          }
+          // Prepended, not appended -- keeps them within charted's default
+          // "first 6" slice below instead of buried past it.
+          header = ['power_kw', 'torque_nm', ...header];
+          parsed.header = header;
+        }
+      }
+    }
+
     // Set up state for replay with proper labels from PARAM_LABELS
-    state.channels = parsed.header.map(id => {
+    state.channels = header.map(id => {
       const info = PARAM_LABELS[id] || { label: id, unit: '' };
       return {
         id,
@@ -1414,9 +1446,9 @@ function loadReplayText(text) {
     // than 120s). Play/scrub just moves the playhead marker over this
     // already-complete chart instead of re-driving fake live samples.
     for (const k of Object.keys(hist)) delete hist[k];
-    for (const id of parsed.header) hist[id] = [];
+    for (const id of header) hist[id] = [];
     for (const row of parsed.rows) {
-      for (const id of parsed.header) {
+      for (const id of header) {
         const v = Number(row.values[id]);
         if (Number.isFinite(v)) hist[id].push({ t: row.epoch, v });
       }
@@ -1427,7 +1459,7 @@ function loadReplayText(text) {
     updateZoomToolbar();
 
     // Initialize charts for replay
-    charted = parsed.header.slice(0, 6); // Chart first 6 params by default
+    charted = header.slice(0, 6); // Chart first 6 params by default
     buildTiles();
     buildCharts();
 }
@@ -1437,7 +1469,7 @@ async function loadReplayFromServer(name) {
   $('replaystatus').textContent = 'Loading ' + name + '…';
   const r = await api('/api/recordings/' + encodeURIComponent(name));
   if (r.error) { $('replaystatus').textContent = 'Error: ' + r.error; return; }
-  loadReplayText(r.content);
+  await loadReplayText(r.content);
 }
 
 async function loadRecordingsPicker() {

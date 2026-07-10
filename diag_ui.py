@@ -852,6 +852,15 @@ def _passport_url(urn):
 
 LIVE_CLIENTS = set()      # live SSE listeners exist -> sampler runs
 LIVE_LAST = {}
+# power_kw/torque_nm are synthetic channels live_sample() computes from
+# maf+rpm (see _POWER_CONSTANT_BY_VIN/_BY_ENGINE), not anything the ECU
+# actually reports -- they're excluded from the CSV recorder's columns
+# (record_start()) so a recording's columns are only ever raw/measured
+# sensor data, never an inferred value baked in at whatever calibration
+# constant happened to be active at record time. ui.html's Replay/Dyno
+# tabs already derive them on demand from maf+rpm wherever they're needed
+# for display, using whatever the current best constant is.
+INFERRED_CHANNELS = {"power_kw", "torque_nm"}
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
             "lock": threading.Lock()}
 CSV_QUEUE = queue.Queue(maxsize=1000)  # Buffer for CSV writer thread
@@ -1259,7 +1268,8 @@ def record_start():
         path = os.path.join(
             DATA, f"drive_log_{time.strftime('%Y%m%d_%H%M%S')}{profile_str}.csv")
         f = open(path, "w", buffering=1)
-        ids = [c["id"] for c in (ADAPTER.live_channels if ADAPTER else [])]
+        ids = [c["id"] for c in (ADAPTER.live_channels if ADAPTER else [])
+               if c["id"] not in INFERRED_CHANNELS]
         # Event columns: event, pull_id, event_data for extensible event system
         f.write("time,epoch,event,pull_id,event_data," + ",".join(ids) + "\n")
         RECORDER.update(on=True, path=path, file=f, count=0, ids=ids)
