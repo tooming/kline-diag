@@ -338,10 +338,25 @@ def reduce(events):
                 owner_id = d["to"]
         elif t == "DiagnosticTroubleCodeRead":
             mod = _module(d)
+            # A full read of a module supersedes that module's previous
+            # state, rather than accumulating into it forever -- a code
+            # can legitimately disappear between scans (e.g. it self-
+            # clears after enough healthy drive cycles) with no explicit
+            # Cleared event ever logged for it. Without this, a fault
+            # that resolved itself months ago stays "open" indefinitely
+            # just because nobody ran the clear command on it specifically.
+            # "since" carries forward from the prior read if the code is
+            # still present (first-seen-in-this-streak, not
+            # last-reconfirmed), reset only for a code that's newly
+            # appeared here.
+            prior = {k: v for k, v in faults.items() if k[0] == mod}
+            for k in prior:
+                del faults[k]
             for c in d.get("codes", []):
-                faults[(mod, c.get("code"))] = {
-                    "module": mod, "code": c.get("code"),
-                    "text": c.get("text"), "since": ev.get("occurredAt")}
+                key = (mod, c.get("code"))
+                since = prior[key]["since"] if key in prior else ev.get("occurredAt")
+                faults[key] = {"module": mod, "code": c.get("code"),
+                                "text": c.get("text"), "since": since}
         elif t == "DiagnosticTroubleCodeCleared":
             mod = _module(d)
             cleared = d.get("codesCleared", [])

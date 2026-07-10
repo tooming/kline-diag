@@ -62,6 +62,29 @@ class ProducerTest(unittest.TestCase):
         self.assertEqual(result_path, path)
         self.assertEqual(len(os.listdir(prod._passports_dir())), 1)
 
+    def test_stale_fault_drops_off_on_a_clean_reread_without_an_explicit_clear(self):
+        """Real bug found live on the E39: a code read once, then absent
+        from every subsequent read of that same module, stayed "open"
+        forever because nothing ever explicitly cleared it -- a fault can
+        legitimately self-resolve (e.g. after enough healthy drive cycles)
+        without the user ever running the clear command on it specifically.
+        A fresh full read of a module must supersede that module's prior
+        state, not just accumulate into it."""
+        prod.record_faults(self.vin, 0x12, "DME", {
+            "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
+                                     "raw": "71"}]})
+        prod.record_faults(self.vin, 0x12, "DME", {"ok": True, "entries": []})
+        state = prod.passport_state(self.vin)
+        self.assertEqual(state["open_faults"], [])
+
+        # A different module's fault is untouched by another module's reread.
+        prod.record_faults(self.vin, 0x60, "IKE", {
+            "ok": True, "entries": [{"code": "0x99", "text": "lamp", "status": "s",
+                                     "raw": "99"}]})
+        prod.record_faults(self.vin, 0x12, "DME", {"ok": True, "entries": []})
+        state = prod.passport_state(self.vin)
+        self.assertEqual([f["code"] for f in state["open_faults"]], ["0x99"])
+
     def test_faults_then_clear_reduces_to_zero_open(self):
         prod.record_faults(self.vin, 0x12, "DME", {
             "ok": True, "entries": [{"code": "0x71", "text": "O2", "status": "s",
