@@ -14,6 +14,7 @@ owner (this server); all car I/O is serialized through one lock. Fault
 memories are snapshotted to fault_snapshots.log before every clear.
 """
 import argparse
+import base64
 import collections
 import json
 import math
@@ -2856,6 +2857,33 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 self._json({"id": curve_id, "curveRef": f"dyno_runs/{curve_id}.json"})
+            elif self.path == "/api/dyno/export-pdf":
+                # The packaged app's window is a native WebView (pywebview
+                # -> WKWebView on macOS), not a real browser -- it has no
+                # downloads UI, so <a download> on a blob: URL just
+                # navigates the whole app window to render the PDF inline
+                # with no way back except quitting. Sidestep that entirely:
+                # the client sends the already-built PDF bytes here and the
+                # server writes the file directly, same as how recordings/
+                # snapshots already work.
+                b = self._body()
+                pdf_b64 = b.get("pdf_base64")
+                if not pdf_b64:
+                    return self._json({"error": "pdf_base64 required"}, 400)
+                try:
+                    pdf_bytes = base64.b64decode(pdf_b64)
+                except Exception:
+                    return self._json({"error": "invalid base64"}, 400)
+                export_dir = os.path.join(DATA, "dyno_exports")
+                os.makedirs(export_dir, exist_ok=True)
+                filename = os.path.basename(
+                    b.get("filename") or f"dyno_{time.strftime('%Y%m%d_%H%M%S')}.pdf")
+                if not filename.lower().endswith(".pdf"):
+                    filename += ".pdf"
+                path = os.path.join(export_dir, filename)
+                with open(path, "wb") as f:
+                    f.write(pdf_bytes)
+                self._json({"path": path})
             elif self.path == "/api/garage/service":
                 # Log a service against any vehicle in the garage, not
                 # just the one currently connected (see /api/passport/service

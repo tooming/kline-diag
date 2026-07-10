@@ -541,6 +541,7 @@
       </div>
       <div id="dynolegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:6px;font-size:12px"></div>
       <button id="dynosave_btn" style="display:none;font-size:11px;margin-top:8px">📄 Save as PDF (A4)</button>
+      <span id="dynosave_status" class="muted" style="font-size:11px;margin-left:8px"></span>
       <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Past runs — overlay for comparison</h3>
       <div id="dynoruns" class="muted">Connect to a vehicle (or browse one from the Workshop garage) to see past runs.</div>
     </section>
@@ -2896,13 +2897,21 @@ async function saveDynoImage() {
   }
 
   const pdf = buildA4Pdf(ops, { bytes: jpegBytes, pxW: chartCanvas.width, pxH: chartCanvas.height });
-  const blob = new Blob([pdf.bytes], { type: "application/pdf" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.download = `dyno_${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
-  a.href = url;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+  // The packaged app's window is a native WebView (pywebview -> WKWebView
+  // on macOS), not a real browser -- <a download> on a blob: URL has no
+  // downloads UI to hand off to, so it just navigates the whole app
+  // window to render the PDF inline with no way back except quitting.
+  // Send the bytes to the local server instead and have it write the file
+  // directly (same pattern as recordings/snapshots), which works
+  // identically whether this is running in the packaged app or a browser.
+  let binary = "";
+  for (let i = 0; i < pdf.bytes.length; i++) binary += String.fromCharCode(pdf.bytes[i]);
+  const filename = `dyno_${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
+  const status = $("dynosave_status");
+  if (status) status.textContent = "Saving...";
+  const r = await api("/api/dyno/export-pdf", { pdf_base64: btoa(binary), filename });
+  if (status) status.textContent = r.error ? "Error: " + r.error : "Saved: " + r.path;
 }
 $("dynosave_btn")?.addEventListener("click", saveDynoImage);
 

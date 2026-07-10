@@ -14,6 +14,7 @@ dist/
 
 # Runtime writable data — never commit (may contain VIN / vehicle telemetry)
 backups/
+dyno_exports/
 kline_raw.log
 fault_snapshots.log
 vanos_events.log
