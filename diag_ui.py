@@ -171,6 +171,59 @@ EXPR_OVERRIDES = {
     "E210": ("x", "raw"),
 }
 
+# Physics-based crank power/torque estimate from mass airflow -- one
+# formula for every petrol engine, no per-VIN/per-engine calibration
+# constant. The earlier approach (a kW-per-g/s ratio back-solved from one
+# real WOT pull's peak MAF against that engine's factory-rated power)
+# quietly stopped being a measurement and became "make this one car read
+# its spec sheet number" -- comparing engines against each other (or a
+# generic-constant car against a calibrated one) was meaningless, and any
+# real deviation from spec on a *sick* engine would get calibrated away
+# instead of showing up.
+#
+#   fuel mass flow (g/s)  = MAF (g/s) / AFR
+#   chemical energy (kW)  = fuel mass flow (g/s) * gasoline LHV (kJ/g)
+#   brake power (kW)      = chemical energy (kW) * brake thermal efficiency
+#
+# Every constant below has physical meaning and is a documented typical
+# value, not a fit:
+GASOLINE_LHV_KJ_PER_G = 44.0   # lower heating value of gasoline, ~44 MJ/kg
+                                # (standard reference value)
+WOT_AFR = 12.6                  # mass air-fuel ratio at wide-open-throttle
+                                 # enrichment for a naturally-aspirated
+                                 # port-injected engine -- typical range is
+                                 # 12.5-13.0:1 (richer than stoichiometric
+                                 # 14.7:1 for cooling/max power/detonation
+                                 # margin), confirmed via web search, not
+                                 # memory.
+BRAKE_THERMAL_EFFICIENCY = 0.30  # typical NA gasoline engine at WOT;
+                                  # general literature range is ~25-30% for
+                                  # conventional (non-Atkinson/non-high-CR)
+                                  # engines, confirmed via web search.
+# If a car's estimate consistently reads high/low against its known-healthy
+# factory rating, that's a signal the physics model (or these defaults) has
+# a systematic bias worth investigating -- not something to paper over with
+# a per-car fudge factor again.
+
+
+def estimate_power_torque(maf_gps, rpm):
+    """Physics-based crank power/torque estimate from mass airflow -- see
+    the constants above for the formula and its assumptions. Same numbers
+    for every petrol engine, deliberately: comparable across cars, and any
+    systematic bias shows up as a bias instead of being silently absorbed
+    into a per-car constant. Returns (power_kw, torque_nm); torque_nm is
+    None below 50 rpm (avoids a division blow-up at engine-off)."""
+    if not maf_gps:
+        return None, None
+    fuel_g_s = maf_gps / WOT_AFR
+    power_kw = fuel_g_s * GASOLINE_LHV_KJ_PER_G * BRAKE_THERMAL_EFFICIENCY
+    torque_nm = None
+    if rpm and rpm > 50:
+        omega = rpm * 2 * math.pi / 60
+        torque_nm = power_kw * 1000 / omega
+    return (round(power_kw, 1),
+            round(torque_nm, 1) if torque_nm is not None else None)
+
 
 class E39Adapter:
     """DS2 protocol (1998 523i)."""
@@ -178,20 +231,6 @@ class E39Adapter:
     proto = "e39"
     modules = ds2_diag.E39_MODULES
     vin = "WBAXXXXXXXXXXXXXX"  # placeholder until a real read is confirmed
-    # kW per g/s of MAF (P12, kg/h -> g/s) -- calibrated per detected engine
-    # (self.dme["engine"], e.g. "M52"), not VIN: DS2 has no confirmed VIN
-    # job (see read_vin()), so vin stays a placeholder forever on this
-    # protocol and can't distinguish cars the way the E87's real VIN can
-    # (see E87Adapter._POWER_CONSTANT_BY_VIN).
-    _POWER_CONSTANT_BY_ENGINE = {
-        # 1998 523i (M52B25, this repo's documented E39): factory rated
-        # 125 kW @ 5500 rpm (confirmed via web search, not memory). A real
-        # WOT pull's MAF right at ~5500-5600 rpm (152.78 g/s) calibrates
-        # this engine's estimate to its actual rating at that point,
-        # rather than guessing a generic constant.
-        "M52": 125.0 / 152.78,
-    }
-    _DEFAULT_POWER_CONSTANT = 0.98 * 0.7457
 
     def read_vin(self):
         """DS2 has no confirmed standard VIN job across this ECU set, so we
@@ -254,8 +293,8 @@ class E39Adapter:
                  "group": "VANOS", "unit": "", "graph": False})
         if any(p["id"] == "P12" for p in params) and any(p["id"] == "P8" for p in params):
             # synthetic channels computed by live_sample() from P12 (MAF)
-            # + P8 (RPM), same estimate approach as the E87 -- see
-            # _POWER_CONSTANT_BY_ENGINE.
+            # + P8 (RPM) via estimate_power_torque(), same physics-based
+            # estimate as the E87.
             self.live_channels.append(
                 {"id": "power_kw", "label": "Est. Crank Power", "unit": "kW",
                  "group": "Engine", "graph": True})
@@ -373,18 +412,12 @@ class E39Adapter:
         s = self.logger.sample() or {}
         maf_kgh = s.get("P12")
         if maf_kgh is not None:
-            # MAF-based dyno estimate, same approach as the E87 -- see
-            # _POWER_CONSTANT_BY_ENGINE for the calibration/uncertainty
-            # notes (only the recognized-engine case should be read as
-            # tracking real-world kW closely).
             maf_gps = maf_kgh * 1000 / 3600
-            k = self._POWER_CONSTANT_BY_ENGINE.get(
-                self.dme.get("engine"), self._DEFAULT_POWER_CONSTANT)
-            s["power_kw"] = round(maf_gps * k, 1)
-            rpm = s.get("P8") or 0
-            if rpm > 50:
-                omega = rpm * 2 * math.pi / 60
-                s["torque_nm"] = round(s["power_kw"] * 1000 / omega, 1)
+            pw, tq = estimate_power_torque(maf_gps, s.get("P8") or 0)
+            if pw is not None:
+                s["power_kw"] = pw
+            if tq is not None:
+                s["torque_nm"] = tq
         return s
 
 
@@ -638,24 +671,6 @@ class E87Adapter:
         "map_kpa": 0x0B, "baro_kpa": 0x33,
         "o2_s1": 0x14, "o2_s2": 0x15, "o2_s3": 0x16, "o2_s4": 0x17,
     }
-    # kW per g/s of MAF -- calibrated per specific car, keyed by VIN, where
-    # a real WOT pull's peak MAF plus the engine's known factory rating
-    # give an actual reference point; _DEFAULT_POWER_CONSTANT (the generic
-    # rule-of-thumb, see live_sample()) otherwise. This class is shared by
-    # every E87 regardless of engine (N45 vs N52...), so this must not be
-    # a single global constant -- calibrating against one car's data would
-    # silently throw off every other car's estimate.
-    _POWER_CONSTANT_BY_VIN = {
-        # 2005 116i (N45B16, this repo's primary documented car): factory
-        # rated 85 kW @ 6000 rpm (confirmed via web search, not memory --
-        # see BMW N45B16 spec sheets). A real WOT pull's peak MAF
-        # (88.25 g/s) landed almost exactly at 6000 rpm, so 85/88.25
-        # calibrates this car's estimate to its actual rating at that
-        # point instead of the generic guess.
-        "WBAXXXXXXXXXXXXXX": 85.0 / 88.25,
-    }
-    _DEFAULT_POWER_CONSTANT = 0.98 * 0.7457
-
     def __init__(self):
         self.kl = KLine(rawlog_path=os.path.join(DATA, "kline_raw.log"))
         self.kl.log = log_hook(self.kl.log)
@@ -812,23 +827,11 @@ class E87Adapter:
             if d:
                 s[chan_id] = round(obd2.decode_pid(pid, d), 2)
         if "maf" in s:
-            # MAF-based dyno estimate. Calibrated against this specific
-            # car's known factory rating when recognized by VIN (see
-            # _POWER_CONSTANT_BY_VIN); otherwise a rough, uncalibrated
-            # rule-of-thumb. Good enough to compare before/after a repair
-            # on the same car either way, but only the calibrated case
-            # should be read as tracking real-world kW at all closely.
-            k = self._POWER_CONSTANT_BY_VIN.get(
-                self.vin, self._DEFAULT_POWER_CONSTANT)
-            s["power_kw"] = round(s["maf"] * k, 1)
-            # Torque follows directly from power_kw + rpm (P = T * omega) --
-            # no separate calibration, just physics -- so it carries exactly
-            # the same uncertainty as power_kw above, no more/less. Only
-            # meaningful once the engine's actually turning.
-            rpm = s.get("rpm") or 0
-            if rpm > 50:
-                omega = rpm * 2 * math.pi / 60
-                s["torque_nm"] = round(s["power_kw"] * 1000 / omega, 1)
+            pw, tq = estimate_power_torque(s["maf"], s.get("rpm") or 0)
+            if pw is not None:
+                s["power_kw"] = pw
+            if tq is not None:
+                s["torque_nm"] = tq
         if not s:
             self._live_init = False  # force re-init next time
         return s
@@ -896,13 +899,14 @@ def _passport_url(urn):
 LIVE_CLIENTS = set()      # live SSE listeners exist -> sampler runs
 LIVE_LAST = {}
 # power_kw/torque_nm are synthetic channels live_sample() computes from
-# maf+rpm (see _POWER_CONSTANT_BY_VIN/_BY_ENGINE), not anything the ECU
-# actually reports -- they're excluded from the CSV recorder's columns
+# maf+rpm (see estimate_power_torque()), not anything the ECU actually
+# reports -- they're excluded from the CSV recorder's columns
 # (record_start()) so a recording's columns are only ever raw/measured
-# sensor data, never an inferred value baked in at whatever calibration
-# constant happened to be active at record time. ui.html's Replay/Dyno
-# tabs already derive them on demand from maf+rpm wherever they're needed
-# for display, using whatever the current best constant is.
+# sensor data, never an inferred value baked in at whatever physics
+# constants happened to be in effect at record time (should the AFR/LHV/
+# efficiency defaults ever get refined). ui.html's Replay/Dyno tabs already
+# derive them on demand from maf+rpm wherever they're needed for display,
+# using the current formula.
 INFERRED_CHANNELS = {"power_kw", "torque_nm"}
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
             "lock": threading.Lock()}
@@ -1595,25 +1599,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(json.load(f))
             except OSError:
                 return self._json({"error": "no such curve"}, 404)
-        if self.path.startswith("/api/dyno/power-constant"):
-            # Resolves the server-side calibration constant (see
-            # E87Adapter._POWER_CONSTANT_BY_VIN / E39Adapter.
-            # _POWER_CONSTANT_BY_ENGINE) so the client can reconstruct
-            # power/torque for an old CSV recorded before those columns
-            # existed. ?vin= for the E87 path, ?engine= for the E39 path
-            # (DS2 has no confirmed VIN read -- see E39Adapter.read_vin --
-            # so engine, not vin, is what the E39 calibrates by).
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            vin = (q.get("vin") or [""])[0].strip()
-            engine = (q.get("engine") or [""])[0].strip()
-            if vin and vin in E87Adapter._POWER_CONSTANT_BY_VIN:
-                return self._json({"constant": E87Adapter._POWER_CONSTANT_BY_VIN[vin],
-                                  "source": "vin"})
-            if engine and engine in E39Adapter._POWER_CONSTANT_BY_ENGINE:
-                return self._json({"constant": E39Adapter._POWER_CONSTANT_BY_ENGINE[engine],
-                                  "source": "engine"})
-            return self._json({"constant": E87Adapter._DEFAULT_POWER_CONSTANT,
-                              "source": "default"})
         if self.path.startswith("/api/cloud/session"):
             # Cloud sign-in status + how many local events are queued to
             # push. Optional ?urn=/?vin= (see _qs_passport_state()) reports
@@ -2901,8 +2886,8 @@ class Handler(BaseHTTPRequestHandler):
                 # endpoint just adds an id, writes it to disk, and records
                 # the summary event. corrects is an earlier DynoRun event id
                 # to supersede (see ovpf_producer.record_dyno_run) -- e.g.
-                # re-generating a pull from Replay after a power-constant
-                # recalibration, so the stale reading drops out of the
+                # re-generating a pull from Replay after a fix to the power
+                # estimate formula, so the stale reading drops out of the
                 # timeline instead of sitting there contradicting the new one.
                 import snapshot as _snap
                 b = self._body()
@@ -2922,11 +2907,22 @@ class Handler(BaseHTTPRequestHandler):
                 with open(os.path.join(vdir, curve_id + ".json"), "w") as f:
                     json.dump(curve, f)
                 pk = curve.get("peaks", {})
+                # conditions (peak airflow/rpm/throttle/load, mean IAT --
+                # see ui.html's computeDynoCurve) are often just as
+                # diagnostically useful as the power estimate itself, so
+                # they ride along in the same event under peaks/conditions
+                # (record_dyno_run puts anything besides power_kw/torque_nm
+                # under data.conditions).
+                peaks_payload = {
+                    "power_kw": pk.get("power_kw_corrected") if pk.get("power_kw_corrected") is not None else pk.get("power_kw"),
+                    "torque_nm": pk.get("torque_nm_corrected") if pk.get("torque_nm_corrected") is not None else pk.get("torque_nm"),
+                }
+                peaks_payload.update({k: v for k, v in curve.get("conditions", {}).items()
+                                       if v is not None})
                 try:
                     ovpf_producer.record_dyno_run(
                         vin,
-                        {"power_kw": pk.get("power_kw_corrected") if pk.get("power_kw_corrected") is not None else pk.get("power_kw"),
-                         "torque_nm": pk.get("torque_nm_corrected") if pk.get("torque_nm_corrected") is not None else pk.get("torque_nm")},
+                        peaks_payload,
                         duration_s=(curve.get("window", {}).get("t_end", 0)
                                    - curve.get("window", {}).get("t_start", 0)) or None,
                         num=curve.get("pull_num"),

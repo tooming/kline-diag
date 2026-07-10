@@ -1386,8 +1386,8 @@ async function loadReplayText(text) {
     replayPlaying = false;
 
     // Older recordings predate power_kw/torque_nm as recorded columns --
-    // reconstruct them from maf+rpm here (same formula/constant-resolution
-    // computeDynoCurve already uses for this exact case) so Replay's own
+    // reconstruct them from maf+rpm here (same physics-based estimate
+    // computeDynoCurve uses for this exact case) so Replay's own
     // tiles/charts show them too, not just a Dyno-tab curve generated from
     // a selection. Without this, an old CSV just silently has no kW/Nm
     // anywhere in Replay.
@@ -1396,19 +1396,20 @@ async function loadReplayText(text) {
       const hasRpm = header.includes('rpm') || header.includes('P8');
       const hasMaf = header.includes('maf') || header.includes('P12');
       if (hasRpm && hasMaf) {
-        const k = await resolvePowerConstant(null, null);
-        if (k != null) {
-          for (const row of parsed.rows) {
-            const rpm = row.values.rpm ?? row.values.P8;
-            const mafRaw = row.values.maf ?? row.values.P12;
-            if (rpm == null || mafRaw == null || rpm <= 50) continue;
-            // P12 (E39) is kg/h and needs the g/s conversion; E87's plain
-            // "maf" is already g/s -- same distinction as normalizeSample.
-            const maf_gps = row.values.P12 != null ? mafRaw * 1000 / 3600 : mafRaw;
-            const power_kw = maf_gps * k;
-            row.values.power_kw = power_kw;
-            row.values.torque_nm = power_kw * 1000 / (rpm * 2 * Math.PI / 60);
-          }
+        let reconstructed = false;
+        for (const row of parsed.rows) {
+          const rpm = row.values.rpm ?? row.values.P8;
+          const mafRaw = row.values.maf ?? row.values.P12;
+          if (rpm == null || mafRaw == null || rpm <= 50) continue;
+          // P12 (E39) is kg/h and needs the g/s conversion; E87's plain
+          // "maf" is already g/s -- same distinction as normalizeSample.
+          const maf_gps = row.values.P12 != null ? mafRaw * 1000 / 3600 : mafRaw;
+          const [power_kw, torque_nm] = estimatePowerTorque(maf_gps, rpm);
+          row.values.power_kw = power_kw;
+          row.values.torque_nm = torque_nm;
+          reconstructed = true;
+        }
+        if (reconstructed) {
           // Prepended, not appended -- keeps them within charted's default
           // "first 6" slice below instead of buried past it.
           header = ['power_kw', 'torque_nm', ...header];
@@ -2481,11 +2482,25 @@ async function loadPulls() {
 // One algorithm, client-side, reused for both an auto-detected live pull
 // (sliced from hist[]) and a manually brush-selected Replay range (sliced
 // from replayData.rows) -- see the plan's "one curve-computation algorithm"
-// note. The only thing that can't live here is the power/torque
-// calibration constant (_POWER_CONSTANT_BY_VIN/_BY_ENGINE only exist in
-// Python) -- callers needing to reconstruct power/torque for an old
-// recording that predates those columns fetch it once via
-// GET /api/dyno/power-constant and pass it in as opts.powerConstant.
+// note.
+
+// Physics-based crank power/torque estimate from mass airflow -- mirrors
+// diag_ui.py's estimate_power_torque() exactly (same constants, same
+// formula). No per-VIN/per-engine calibration: fuel mass flow (MAF/AFR)
+// times gasoline's lower heating value times a typical WOT brake thermal
+// efficiency. See diag_ui.py's comment above estimate_power_torque() for
+// why a per-car fitted constant was replaced with this.
+const GASOLINE_LHV_KJ_PER_G = 44.0;
+const WOT_AFR = 12.6;
+const BRAKE_THERMAL_EFFICIENCY = 0.30;
+function estimatePowerTorque(maf_gps, rpm) {
+  if (!maf_gps) return [null, null];
+  const fuel_g_s = maf_gps / WOT_AFR;
+  const power_kw = fuel_g_s * GASOLINE_LHV_KJ_PER_G * BRAKE_THERMAL_EFFICIENCY;
+  let torque_nm = null;
+  if (rpm && rpm > 50) torque_nm = power_kw * 1000 / (rpm * 2 * Math.PI / 60);
+  return [power_kw, torque_nm];
+}
 
 // Maps each adapter's raw channel ids to one common shape. E39/DS2 uses
 // P8/P12/P11/P7 (P12 is MAF in kg/h, needs g/s conversion); E87/KWP2000
@@ -2495,11 +2510,21 @@ function normalizeSample(t, values) {
   const maf_gps = values.P12 != null ? values.P12 * 1000 / 3600 : values.maf;
   const iat_c = values.P11 ?? values.iat_c;
   const map_kpa = values.P7 ?? values.map_kpa;
+  const throttle_pct = values.P13 ?? values.throttle;
+  // E39's load channel (E2) is mg/stroke, not a percentage like E87's
+  // engine_load -- genuinely different quantities, so the unit rides along
+  // rather than pretending they're comparable.
+  const load = values.E2 ?? values.engine_load;
+  const load_unit = values.E2 != null ? "mg/stroke"
+    : values.engine_load != null ? "%" : null;
   return {
     t, rpm: rpm != null ? Number(rpm) : null,
     maf_gps: maf_gps != null ? Number(maf_gps) : null,
     iat_c: iat_c != null ? Number(iat_c) : null,
     map_kpa: map_kpa != null ? Number(map_kpa) : null,
+    throttle_pct: throttle_pct != null ? Number(throttle_pct) : null,
+    load: load != null ? Number(load) : null,
+    load_unit,
     power_kw: values.power_kw != null ? Number(values.power_kw) : null,
     torque_nm: values.torque_nm != null ? Number(values.torque_nm) : null,
   };
@@ -2507,9 +2532,8 @@ function normalizeSample(t, values) {
 
 // SAE J1349 correction factor. Pd_kpa = ambient-pressure proxy (max MAP
 // observed at WOT across the window -- manifold pressure approaches
-// ambient at wide-open throttle on a naturally-aspirated engine; see
-// diag_ui.py's E39Adapter/E87Adapter _POWER_CONSTANT comments for the
-// matching server-side rationale). T_kelvin = mean IAT + 273.15. No
+// ambient at wide-open throttle on a naturally-aspirated engine).
+// T_kelvin = mean IAT + 273.15. No
 // humidity sensor exists on either car, so this omits J1349's dry-pressure
 // water-vapor subtraction -- a small (~1%) known over-correction,
 // documented rather than hidden. J1349 itself only trusts a factor within
@@ -2551,13 +2575,32 @@ function computeDynoCurve(rawSamples, opts) {
   }
   samples = segments.reduce((a, b) => a.length >= b.length ? a : b);
 
+  // Peak conditions alongside the power/torque estimate -- often just as
+  // diagnostically useful (e.g. "throttle never hit 100%" or "airflow
+  // capped early" explains a low reading better than the kW number alone
+  // does). Taken from this gear-filtered set, before the power_kw filter
+  // below potentially drops a few rows.
+  const avg0 = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+  const max0 = arr => arr.length ? Math.max(...arr) : null;
+  const loadUnit = samples.find(s => s.load_unit)?.load_unit || null;
+  const conditions = {
+    peak_maf_gps: round1(max0(samples.map(s => s.maf_gps).filter(v => v != null))),
+    peak_rpm: max0(samples.map(s => s.rpm).filter(v => v != null)),
+    peak_throttle_pct: round1(max0(samples.map(s => s.throttle_pct).filter(v => v != null))),
+    peak_load: round1(max0(samples.map(s => s.load).filter(v => v != null))),
+    load_unit: loadUnit,
+    iat_mean_c: round1(avg0(samples.map(s => s.iat_c).filter(v => v != null))),
+  };
+
   // Reconstruct power/torque from maf_gps+rpm where missing (old
-  // recordings predating those columns) using the resolved calibration
-  // constant, same physics as diag_ui.py's live_sample().
-  const k = opts.powerConstant != null ? opts.powerConstant : 0.730786;
+  // recordings predating those columns, or live samples that only ever
+  // carried maf) -- same physics-based estimate as diag_ui.py's
+  // estimate_power_torque(), no per-car calibration.
   for (const s of samples) {
     if (s.power_kw == null && s.maf_gps != null) {
-      s.power_kw = s.maf_gps * k;
+      const [pw, tq] = estimatePowerTorque(s.maf_gps, s.rpm);
+      s.power_kw = pw;
+      if (s.torque_nm == null) s.torque_nm = tq;
     }
     if (s.torque_nm == null && s.power_kw != null && s.rpm > 50) {
       s.torque_nm = s.power_kw * 1000 / (s.rpm * 2 * Math.PI / 60);
@@ -2644,7 +2687,7 @@ function computeDynoCurve(rawSamples, opts) {
   };
 
   return {
-    bins, peaks, correction, gear_shift_detected: gearShiftDetected,
+    bins, peaks, correction, conditions, gear_shift_detected: gearShiftDetected,
     window: { t_start, t_end, n_samples: samples.length },
     bin_width_rpm: binWidth,
   };
@@ -2953,18 +2996,26 @@ function setDynoCurrent(curve, label) {
   } else {
     const pk = curve.peaks;
     const pw = pk.power_kw_corrected ?? pk.power_kw, tq = pk.torque_nm_corrected ?? pk.torque_nm;
+    const c = curve.conditions || {};
+    // Peak power/torque are one physics-based estimate with real
+    // uncertainty (see estimatePowerTorque) -- the raw measured peaks
+    // alongside it (airflow, rpm, throttle, load, IAT) are direct sensor
+    // readings, often just as useful for diagnosis (e.g. "throttle never
+    // reached 100%" explains a low number better than the kW figure does).
+    const condChips = [
+      c.peak_maf_gps != null ? ppChip("Peak airflow", `${c.peak_maf_gps} g/s`) : "",
+      c.peak_rpm != null ? ppChip("Peak RPM", c.peak_rpm) : "",
+      c.peak_throttle_pct != null ? ppChip("Peak throttle", `${c.peak_throttle_pct}%`) : "",
+      c.peak_load != null ? ppChip("Peak load", `${c.peak_load}${c.load_unit || ""}`) : "",
+      c.iat_mean_c != null ? ppChip("IAT", `${c.iat_mean_c}°C`) : "",
+    ].join("");
     $("dyno_current").innerHTML = `<strong>${wsEsc(label)}</strong> — ${pw.toFixed(1)} kW @ ${pk.power_kw_rpm} rpm / ${tq.toFixed(1)} Nm @ ${pk.torque_nm_rpm} rpm` +
       (curve.gear_shift_detected ? ` <span class="muted">(gear shift detected, showing ${curve.bins[0].rpm}–${curve.bins[curve.bins.length-1].rpm} rpm only)</span>` : "") +
-      (curve.correction && !curve.correction.valid_range ? ` <span style="color:var(--warn)">correction factor out of validated range (${curve.correction.cf.toFixed(3)}) — treat corrected values with caution</span>` : "");
+      (curve.correction && !curve.correction.valid_range ? ` <span style="color:var(--warn)">correction factor out of validated range (${curve.correction.cf.toFixed(3)}) — treat corrected values with caution</span>` : "") +
+      (condChips ? `<div class="row" style="gap:6px;flex-wrap:wrap;margin-top:8px">${condChips}</div>` : "");
     dynoCurrent = { label, color: DYNO_COLORS[0], curve };
   }
   updateDynoChart();
-}
-
-async function resolvePowerConstant(vin, engine) {
-  const q = vin ? `?vin=${encodeURIComponent(vin)}` : (engine ? `?engine=${encodeURIComponent(engine)}` : "");
-  const r = await api("/api/dyno/power-constant" + q);
-  return r && r.constant;
 }
 
 async function saveDynoRun(curve, source) {
@@ -3017,7 +3068,8 @@ async function loadDynoRuns() {
 // the app."
 async function autoGenerateDynoFromPull(pull) {
   if (!pull || !pull.t_start || !pull.t_end) return;
-  const chanIds = ["P8", "rpm", "P12", "maf", "P11", "iat_c", "P7", "map_kpa", "power_kw", "torque_nm"];
+  const chanIds = ["P8", "rpm", "P12", "maf", "P11", "iat_c", "P7", "map_kpa",
+                   "P13", "throttle", "E2", "engine_load", "power_kw", "torque_nm"];
   const samples = [];
   const ref = hist.rpm || hist.P8 || [];
   for (const p of ref) {
@@ -3030,11 +3082,7 @@ async function autoGenerateDynoFromPull(pull) {
     }
     samples.push(normalizeSample(p.t, values));
   }
-  let powerConstant;
-  if (!samples.some(s => s.power_kw != null)) {
-    powerConstant = await resolvePowerConstant(state.vin, null);
-  }
-  const curve = computeDynoCurve(samples, { powerConstant });
+  const curve = computeDynoCurve(samples);
   if (curve.insufficient) return;  // don't clutter the tab/log with junk pulls
   curve.pull_num = pull.num;
   setDynoCurrent(curve, `Pull #${pull.num} (live)`);
@@ -3048,14 +3096,7 @@ async function generateDynoFromSelection(pull) {
   const samples = replayData.rows
     .filter(r => r.epoch >= selRange.t0 && r.epoch <= selRange.t1)
     .map(r => normalizeSample(r.epoch, r.values));
-  let powerConstant;
-  if (!samples.some(s => s.power_kw != null)) {
-    // Old recording predates the power_kw/torque_nm columns -- resolve the
-    // server-side calibration constant (vin/engine unknown for an
-    // arbitrary loaded CSV, so this falls back to the generic default).
-    powerConstant = await resolvePowerConstant(null, null);
-  }
-  const curve = computeDynoCurve(samples, { powerConstant });
+  const curve = computeDynoCurve(samples);
   showTab("analysis");
   $("dynosec")?.scrollIntoView();
   if (curve.insufficient) {
