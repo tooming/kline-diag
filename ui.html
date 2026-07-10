@@ -4073,6 +4073,20 @@ $("pp_open_ref").addEventListener("keydown", e => {
   if (e.key === "Enter") openPassportByRef($("pp_open_ref").value, $("pp_open_ref_result"));
 });
 async function loadPassport() {
+  // state is otherwise only ever populated once at page load, plus
+  // whenever the user explicitly clicks Connect (see the IIFE at the
+  // bottom of this file and connectBtn's handler) -- never on a
+  // recurring poll. A K-line adapter drop-and-recover cycle (see
+  // CLAUDE.md's "Adapter failure modes") happens entirely server-side;
+  // the client never learns about it, so state.connected/state.vin can
+  // silently go stale for as long as this page has been open, well past
+  // the point where the car's actually back online. Confirmed live: a
+  // fresh page load reflected the real connection correctly, but an
+  // already-open window kept showing the pre-drop snapshot. Passport
+  // view is exactly where that staleness is most visible (drives the
+  // "connected car" banner below), so refresh it every time this loads
+  // rather than trusting however old the in-memory copy is.
+  setState(await api("/api/state"));
   const empty = $("passportempty"), body = $("passportbody");
   const banner = $("pp_viewing_banner");
   // Only a genuine mismatch counts as "browsing" -- if it happens to be the
