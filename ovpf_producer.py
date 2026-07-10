@@ -272,7 +272,8 @@ def record_live_session(vin, channels, sample_rate=None, attachment_ref=None, op
         urn, "LiveDataRecorded", data, _stamp_operator(PRODUCER, operator)))
 
 
-def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None, operator=None):
+def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None,
+                     operator=None, corrects=None):
     """Append a `DynoRun` -- peak power/torque from a detected WOT pull,
     producer type Diagnostic since these numbers came straight off the
     ECU's live channels, not a person's claim. `peaks` is whatever numeric
@@ -292,7 +293,14 @@ def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None, opera
     entirely client-driven (ui.html's computeDynoCurve -> POST
     /api/dyno/save): detect_pull() itself no longer calls this directly,
     so a pull only gets a DynoRun event once the client has actually
-    computed and saved a curve for it."""
+    computed and saved a curve for it.
+
+    `corrects` is the OVPF spec's supersede-in-place mechanism (id of an
+    earlier event this one replaces) -- events are append-only/hash-chained
+    so a stale reading (e.g. a pull computed under a since-recalibrated
+    power constant) can't be edited, only superseded. reduce() already
+    drops any event named by a later `corrects` from derived state/timeline
+    (ovpf_core.py); this just lets a caller set it."""
     if not peaks:
         return None
     path, urn = ensure_passport(vin)
@@ -311,8 +319,11 @@ def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None, opera
         data["pullNumber"] = num
     if curve_ref:
         data["curveRef"] = curve_ref
-    return ovpf_core.append(path, ovpf_core.envelope(
-        urn, "DynoRun", data, _stamp_operator(PRODUCER, operator)))
+    event = ovpf_core.envelope(
+        urn, "DynoRun", data, _stamp_operator(PRODUCER, operator))
+    if corrects:
+        event["corrects"] = corrects
+    return ovpf_core.append(path, event)
 
 
 def passport_state(vin):

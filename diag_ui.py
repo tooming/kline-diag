@@ -2895,10 +2895,15 @@ class Handler(BaseHTTPRequestHandler):
                 # Persist a curve computed client-side (ui.html's
                 # computeDynoCurve -- see its comment for why this is the
                 # one write path for a DynoRun event now, not
-                # detect_pull()). Body: {vin?, curve: {...}, note?}. curve
-                # is the full shape computeDynoCurve returns (bins, peaks,
-                # correction, window, ...); this endpoint just adds an id,
-                # writes it to disk, and records the summary event.
+                # detect_pull()). Body: {vin?, curve: {...}, note?,
+                # corrects?}. curve is the full shape computeDynoCurve
+                # returns (bins, peaks, correction, window, ...); this
+                # endpoint just adds an id, writes it to disk, and records
+                # the summary event. corrects is an earlier DynoRun event id
+                # to supersede (see ovpf_producer.record_dyno_run) -- e.g.
+                # re-generating a pull from Replay after a power-constant
+                # recalibration, so the stale reading drops out of the
+                # timeline instead of sitting there contradicting the new one.
                 import snapshot as _snap
                 b = self._body()
                 vin = (b.get("vin") or "").strip() or _current_vin()
@@ -2926,7 +2931,8 @@ class Handler(BaseHTTPRequestHandler):
                                    - curve.get("window", {}).get("t_start", 0)) or None,
                         num=curve.get("pull_num"),
                         curve_ref=f"dyno_runs/{curve_id}.json",
-                        operator=_current_operator())
+                        operator=_current_operator(),
+                        corrects=b.get("corrects"))
                 except Exception:
                     pass
                 self._json({"id": curve_id, "curveRef": f"dyno_runs/{curve_id}.json"})
