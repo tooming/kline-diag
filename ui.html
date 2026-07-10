@@ -2910,8 +2910,14 @@ async function saveDynoImage() {
   const filename = `dyno_${new Date().toISOString().replace(/[:.]/g, "-")}.pdf`;
   const status = $("dynosave_status");
   if (status) status.textContent = "Saving...";
-  const r = await api("/api/dyno/export-pdf", { pdf_base64: btoa(binary), filename });
-  if (status) status.textContent = r.error ? "Error: " + r.error : "Saved: " + r.path;
+  // open:true -- server launches the OS's default PDF viewer as its own
+  // separate process (not the app's WebView, which is what broke this in
+  // the first place), so this doubles as "open the PDF from the app".
+  const r = await api("/api/dyno/export-pdf", { pdf_base64: btoa(binary), filename, open: true });
+  if (status) {
+    status.textContent = r.error ? "Error: " + r.error
+      : r.opened ? "Saved and opened: " + r.path : "Saved: " + r.path;
+  }
 }
 $("dynosave_btn")?.addEventListener("click", saveDynoImage);
 

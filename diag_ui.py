@@ -20,6 +20,7 @@ import json
 import math
 import os
 import queue
+import subprocess
 import urllib.parse
 import sys
 import threading
@@ -814,6 +815,20 @@ class E87Adapter:
 
 ADAPTER = None            # current protocol adapter
 ADAPTER_ERR = ""
+
+
+def _open_file(path):
+    """Launch the OS's default viewer for a file as its own separate
+    process/window -- distinct from (and safe unlike) navigating the app's
+    own pywebview/WKWebView window to the file, which has no downloads UI
+    and just hijacks the whole app window with no way back (see
+    /api/dyno/export-pdf)."""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", path])
+    elif sys.platform.startswith("win"):
+        os.startfile(path)  # noqa: Windows-only API, guarded by the platform check
+    else:
+        subprocess.Popen(["xdg-open", path])
 
 
 def _current_vin():
@@ -2883,7 +2898,14 @@ class Handler(BaseHTTPRequestHandler):
                 path = os.path.join(export_dir, filename)
                 with open(path, "wb") as f:
                     f.write(pdf_bytes)
-                self._json({"path": path})
+                opened = False
+                if b.get("open", True):
+                    try:
+                        _open_file(path)
+                        opened = True
+                    except Exception:
+                        pass  # best-effort -- the file is saved either way
+                self._json({"path": path, "opened": opened})
             elif self.path == "/api/garage/service":
                 # Log a service against any vehicle in the garage, not
                 # just the one currently connected (see /api/passport/service
