@@ -19,5 +19,10 @@
   "2C56": "DME: lambda probe signal",
   "2E95": "DME: generator (alternator)",
   "2EE0": "DME: coolant temperature sensor signal",
-  "2DEB": "DME: power management vehicle electrical system"
+  "2DEB": "DME: power management vehicle electrical system",
+  "9E33": "PDC: rear left ultrasonic sensor wire fault",
+  "9E34": "PDC: rear right ultrasonic sensor wire fault",
+  "9E35": "PDC: rear center-left ultrasonic sensor wire fault",
+  "9E36": "PDC: rear center-right ultrasonic sensor wire fault",
+  "9E3B": "PDC: ultrasonic sensor power supply line fault"
 }

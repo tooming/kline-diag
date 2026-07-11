@@ -177,7 +177,12 @@ def ensure_passport(vin):
 
 def record_faults(vin, addr, module_name, faults_result, operator=None):
     """Append a `DiagnosticTroubleCodeRead` from an adapter faults() result.
-    De-dupes: unchanged code set since the last read for this module -> skip."""
+    De-dupes: unchanged (code, text, status) set since the last read for
+    this module -> skip. Comparing more than just the code means a DTC
+    table gaining a translation that was blank at capture time (or a
+    status change like pending -> confirmed) still produces a fresh event
+    even though the code set itself didn't change -- otherwise that
+    correction could never reach an already-synced passport."""
     if not faults_result or not faults_result.get("ok"):
         return None
     addr_hex = f"0x{addr:02X}"
@@ -186,12 +191,15 @@ def record_faults(vin, addr, module_name, faults_result, operator=None):
              for e in faults_result.get("entries", [])]
     data = {"module": {"address": addr_hex, "name": module_name}, "codes": codes}
 
+    def _key(c):
+        return (c.get("code"), c.get("text", ""), c.get("status", ""))
+
     with _WRITE_LOCK:
         path, urn = ensure_passport(vin)
         prev = _last_event(path, "DiagnosticTroubleCodeRead")
         if prev and prev.get("data", {}).get("module", {}).get("address") == addr_hex:
-            prev_codes = sorted(c.get("code") for c in prev["data"].get("codes", []))
-            if prev_codes == sorted(c["code"] for c in codes):
+            prev_set = sorted(_key(c) for c in prev["data"].get("codes", []))
+            if prev_set == sorted(_key(c) for c in codes):
                 return None
         return ovpf_core.append(path, ovpf_core.envelope(
             urn, "DiagnosticTroubleCodeRead", data, _stamp_operator(PRODUCER, operator)))

@@ -975,6 +975,34 @@ def _current_operator():
     return None
 
 
+# Serializes background pushes so two auto-push threads firing close
+# together (e.g. a coding write immediately followed by a fault re-read)
+# can't race on ovpf_cloud's synced-ids file (read-modify-write, no
+# locking of its own).
+_PUSH_LOCK = threading.Lock()
+
+
+def _auto_push(vin):
+    """Fire-and-forget cloud sync right after a local OVPF event is
+    recorded, so nothing sits queued waiting for someone to click the
+    dashboard's manual sync button. Best-effort like the record_* calls
+    themselves: no session, offline, or a provider error just leaves the
+    event queued for the next auto-push or manual sync -- never surfaced
+    to the caller, never blocks the request or (if called with CAR_LOCK
+    held) the car."""
+    if not vin:
+        return
+
+    def _run():
+        with _PUSH_LOCK:
+            try:
+                import ovpf_cloud
+                ovpf_cloud.push_passport(vin)
+            except Exception:
+                pass
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _passport_url(urn):
     """Public passport.skoor.ee URL for a passport urn, or None if unminted.
     Same $OVPF_BASE_URL convention as the QR code (see do_GET) -- shared here
@@ -2024,6 +2052,7 @@ class Handler(BaseHTTPRequestHandler):
                         "vin": ADAPTER.vin,
                         "engine": info.get("engine"),
                         "dme": info.get("dme")}, operator=_current_operator())
+                    _auto_push(ADAPTER.vin)
                 except Exception:
                     pass
             self._json({"detected": info,
@@ -2088,6 +2117,7 @@ class Handler(BaseHTTPRequestHandler):
                         ADAPTER.vin, addr,
                         ADAPTER.modules.get(addr, f"0x{addr:02X}"), res,
                         operator=_current_operator())
+                    _auto_push(ADAPTER.vin)
                 except Exception:
                     pass
                 self._json(res)
@@ -2120,6 +2150,7 @@ class Handler(BaseHTTPRequestHandler):
                             ovpf_producer.record_clear(
                                 ADAPTER.vin, addr, module_name,
                                 operator=_current_operator())
+                            _auto_push(ADAPTER.vin)
                         except Exception:
                             pass
 
@@ -2273,6 +2304,7 @@ class Handler(BaseHTTPRequestHandler):
                                 ADAPTER.vin, addr, module_name,
                                 current_coding.hex(), new_coding.hex(),
                                 preset=preset_id, operator=_current_operator())
+                            _auto_push(ADAPTER.vin)
                         except Exception:
                             pass
 
@@ -2381,6 +2413,7 @@ class Handler(BaseHTTPRequestHandler):
                                 ADAPTER.vin, addr, module_name,
                                 current_coding.hex(), new_coding.hex(),
                                 operator=_current_operator())
+                            _auto_push(ADAPTER.vin)
                         except Exception:
                             pass
 
@@ -2498,6 +2531,7 @@ class Handler(BaseHTTPRequestHandler):
                                 ADAPTER.vin, addr, module_name,
                                 current_coding.hex(), old_coding.hex(),
                                 preset=f"restore:{operation_id}", operator=_current_operator())
+                            _auto_push(ADAPTER.vin)
                         except Exception:
                             pass
 
@@ -2667,6 +2701,7 @@ class Handler(BaseHTTPRequestHandler):
                     odometer_unit=b.get("odometerUnit", "KMT"),
                     price=b.get("price"), currency=b.get("currency"),
                     notes=b.get("notes"), operator=_current_operator())
+                _auto_push(_current_vin())
                 self._json(ev)
             elif self.path == "/api/passport/create":
                 # Mint a passport with no live connection -- anonymous-first:
@@ -2695,6 +2730,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json({"error": "at least one vehicle fact required"}, 400)
                 ev = ovpf_producer.record_vehicle_identified(
                     _current_vin(), facts, operator=_current_operator())
+                _auto_push(_current_vin())
                 self._json(ev or {"note": "unchanged -- same facts already recorded"})
             elif self.path == "/api/vehicle/name":
                 # Local-only nickname (see ovpf_producer.set_vehicle_name) --
@@ -2866,6 +2902,7 @@ class Handler(BaseHTTPRequestHandler):
                         curve_ref=f"dyno_runs/{curve_id}.json",
                         operator=_current_operator(),
                         corrects=b.get("corrects"))
+                    _auto_push(vin)
                 except Exception:
                     pass
                 self._json({"id": curve_id, "curveRef": f"dyno_runs/{curve_id}.json"})
@@ -2918,6 +2955,7 @@ class Handler(BaseHTTPRequestHandler):
                     odometer_unit=b.get("odometerUnit", "KMT"),
                     price=b.get("price"), currency=b.get("currency"),
                     notes=b.get("notes"), operator=_current_operator())
+                _auto_push(vin)
                 self._json(ev)
             else:
                 self._json({"error": "not found"}, 404)

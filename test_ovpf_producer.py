@@ -100,6 +100,22 @@ class ProducerTest(unittest.TestCase):
         self.assertIsNotNone(prod.record_faults(self.vin, 0x12, "DME", r))
         self.assertIsNone(prod.record_faults(self.vin, 0x12, "DME", r))  # same -> skip
 
+    def test_faults_text_correction_is_not_deduped(self):
+        """A DTC table gaining a translation that was blank when the code
+        was first captured (the PDC 9E3x codes on the E87 passport, in
+        practice) must still reach the passport on a rescan, even though
+        the code set itself hasn't changed."""
+        blank = {"ok": True, "entries": [{"code": "0x9E33", "text": "",
+                                          "status": "s", "raw": "9E33"}]}
+        self.assertIsNotNone(prod.record_faults(self.vin, 0x64, "PDC", blank))
+        corrected = {"ok": True, "entries": [{"code": "0x9E33",
+                                              "text": "PDC: rear left sensor wire fault",
+                                              "status": "s", "raw": "9E33"}]}
+        self.assertIsNotNone(prod.record_faults(self.vin, 0x64, "PDC", corrected))
+        state = prod.passport_state(self.vin)
+        self.assertEqual(state["open_faults"][0]["text"],
+                         "PDC: rear left sensor wire fault")
+
     def test_vehicle_identified_deduped(self):
         f = {"vin": self.vin, "engine": "M52B25"}
         self.assertIsNotNone(prod.record_vehicle_identified(self.vin, f))
