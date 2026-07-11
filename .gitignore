@@ -23,6 +23,8 @@ drive_log_*.csv
 power_log_*.csv
 vag_log_*.csv
 *.log
+report_*.md
+report_*.json
 
 # OVPF passport event logs (contain VIN / vehicle data)
 passports/
