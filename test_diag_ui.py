@@ -52,6 +52,27 @@ class DetectPullTest(unittest.TestCase):
         t = self._sample(0.11, rpm, 40)  # driver lifts off
         self.assertEqual(t[0], "end")
 
+    def test_sparse_e87_cadence_still_detects_a_real_pull(self):
+        """Real bug found live on the E87: KWP2000's per-PID round trips
+        sample at ~0.83-1.1s intervals -- slower than the 0.6s rpm_history
+        window -- so the window's age-based trim emptied down to just the
+        sample that was *just appended* every call, baseline_rpm compared
+        rpm against itself, and detect_pull() silently never fired for an
+        entire real recorded WOT pull (1163->6533rpm, throttle 82->100%).
+        Replays that exact cadence: ~0.83s per sample, ~470rpm/sample."""
+        transitions = []
+        rpm = 1163
+        for _ in range(12):
+            rpm += 470
+            t = self._sample(0.83, rpm, 100)
+            if t:
+                transitions.append(t)
+        self.assertTrue(any(t[0] == "start" for t in transitions),
+                         "pull start never detected at E87 sampling cadence")
+
+        t = self._sample(0.83, rpm, 9)  # driver lifts off
+        self.assertEqual(t[0], "end")
+
     def test_idle_noise_does_not_false_trigger(self):
         """Small fluctuations around a stable idle/cruise rpm, even with
         throttle occasionally blipping, must not register as a pull."""

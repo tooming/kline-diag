@@ -1363,7 +1363,17 @@ def detect_pull(values):
     hist = PULL_STATE.setdefault("rpm_history", [])
     hist.append((now, rpm))
     window_s = 0.6
-    while len(hist) > 1 and now - hist[0][0] > window_s:
+    # Real bug found live on the E87: KWP2000's per-PID round trips sample
+    # at ~0.83-1.1s intervals (confirmed against an actual recorded WOT
+    # pull, 1163->6533rpm), slower than this 0.6s window -- so the trim
+    # below emptied hist down to just the sample that was *just appended*
+    # every single call, baseline_rpm ended up comparing rpm against
+    # itself, and detect_pull() silently never fired for the entire pull.
+    # `> 2` (not `> 1`) keeps at least one older sample around whenever the
+    # sampling interval alone exceeds window_s, falling back to a plain
+    # previous-sample comparison -- while leaving the dense E39 case (many
+    # samples per window) governed by the age-based trim exactly as before.
+    while len(hist) > 2 and now - hist[0][0] > window_s:
         hist.pop(0)
     baseline_rpm = hist[0][1]
     rpm_increasing = rpm > baseline_rpm + 150  # meaningful climb across the window
