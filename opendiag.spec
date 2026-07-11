@@ -39,6 +39,16 @@ try:
     _version = (_rev or 'unknown') + ('+dirty' if _dirty else '')
 except (OSError, subprocess.SubprocessError):
     _version = 'unknown'
+# Human-friendly counterpart of _version for the macOS bundle's
+# CFBundleShortVersionString (the native "About OpenDiag" panel reads that
+# plist field directly, not version.txt) -- resolves to the release tag
+# (e.g. "v0.8.24") on a tagged build, or "<tag>-<n>-g<sha>" between tags.
+try:
+    _tag_version = subprocess.run(
+        ['git', 'describe', '--tags', '--always', '--dirty'],
+        capture_output=True, text=True, timeout=5).stdout.strip() or 'unknown'
+except (OSError, subprocess.SubprocessError):
+    _tag_version = 'unknown'
 _version_dir = tempfile.mkdtemp()
 _version_file = os.path.join(_version_dir, 'version.txt')
 with open(_version_file, 'w') as _vf:
@@ -98,7 +108,8 @@ if sys.platform == 'darwin':
         info_plist={
             'NSHighResolutionCapable': True,
             'LSMinimumSystemVersion': '10.13',
-            'CFBundleShortVersionString': '1.0',
+            'CFBundleShortVersionString': _tag_version,
+            'CFBundleVersion': _rev or 'unknown',
         },
     )
 else:
