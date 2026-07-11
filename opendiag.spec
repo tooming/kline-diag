@@ -8,7 +8,10 @@ The read-only tables + ui.html are bundled as data (found via
 paths.resource_dir() -> sys._MEIPASS at runtime); writable data (logs,
 backups) goes to a per-user folder via paths.data_dir().
 """
+import os
+import subprocess
 import sys
+import tempfile
 
 import certifi
 
@@ -23,6 +26,24 @@ datas = [(f, '.') for f in (
     'operations.json',
     'reference_ms43_ds2_commands.ts',
 )]
+
+# Frozen builds have no .git inside the bundle for paths.app_version() to
+# read at runtime -- bake the git identity in now, at build time, instead.
+try:
+    _rev = subprocess.run(
+        ['git', 'rev-parse', '--short', 'HEAD'],
+        capture_output=True, text=True, timeout=5).stdout.strip()
+    _dirty = subprocess.run(
+        ['git', 'status', '--porcelain'],
+        capture_output=True, text=True, timeout=5).stdout.strip()
+    _version = (_rev or 'unknown') + ('+dirty' if _dirty else '')
+except (OSError, subprocess.SubprocessError):
+    _version = 'unknown'
+_version_dir = tempfile.mkdtemp()
+_version_file = os.path.join(_version_dir, 'version.txt')
+with open(_version_file, 'w') as _vf:
+    _vf.write(_version)
+datas += [(_version_file, '.')]
 # A frozen build has no OS certificate store to fall back on, so every
 # HTTPS call in ovpf_cloud.py would fail with CERTIFICATE_VERIFY_FAILED
 # without one. Bundling certifi's cacert.pem as a plain resource file

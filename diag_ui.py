@@ -649,8 +649,8 @@ class E87Adapter:
         # Once `power_diag.py pids` (or a live scan) shows which of these
         # respond, cross-reference PID 0x13's presence bitmap to relabel the
         # ones that answer as e.g. "O2 Bank 1 Pre-Cat" -- relevant here since
-        # the DME has stored 29F4/29F5 (Bank 1/2 catalyst efficiency, see
-        # backups/WBAXXXXXXXXXXXXXX/20260709_225920_clear_faults), and a
+        # a DME on this code path has stored 29F4/29F5 (Bank 1/2 catalyst
+        # efficiency; see that car's local backups/<VIN>/ tree), and a
         # post-cat sensor bouncing 0.1-0.9V like the pre-cat one would
         # confirm a worn catalyst rather than a sensor/fueling fault.
         {"id": "o2_s1", "label": "O2 Sensor 1 (PID 0x14)", "unit": "V",
@@ -766,6 +766,21 @@ class E87Adapter:
             self.kl.stop_comm(addr)
         return out
 
+    def dme_ident(self):
+        """Raw DME (0x12) identification string, for vehicle-info/report
+        purposes. This project has no engine-variant registry for KWP2000
+        cars yet (unlike dme_registry.py's DS2/E39 one) -- the E87 code
+        path is shared by more than one physical car with different
+        engines (see CLAUDE.md), so returning the real ident text instead
+        of a hardcoded model/engine guess is the only honest option until
+        one exists."""
+        self._live_init = False
+        if self.kl.fast_init(0x12) is None:
+            return None
+        parts = power_diag.read_ident_parts(self.kl, 0x12)
+        self.kl.stop_comm(0x12)
+        return parts[2].strip(".") if parts else None
+
     def faults(self, addr, _init=True):
         if _init:
             self._live_init = False
@@ -864,6 +879,78 @@ def _current_vin():
     resolves to the single "unknown vin" passport, same as running this
     tool with no car plugged in at all."""
     return ADAPTER.vin if ADAPTER else None
+
+
+def gather_vehicle_info():
+    """Best-known facts about the connected car, shared by /api/vehicle and
+    /api/report_metadata. Assumes ADAPTER is set; callers check that first."""
+    vehicle_info = {
+        "vin": ADAPTER.vin,
+        # generic across adapters: vin has been promoted from the
+        # placeholder once any adapter's read_vin() confirms a
+        # real one (see E39Adapter/E87Adapter.detect())
+        "vin_confirmed": ADAPTER.vin != "WBAXXXXXXXXXXXXXX",
+        "protocol": ADAPTER.proto,
+        "adapter_name": ADAPTER.name
+    }
+
+    # Try to get additional info from IKE ident (if E39)
+    if ADAPTER.proto == "e39" and hasattr(ADAPTER, 'ds2') and ADAPTER.ds2:
+        with CAR_LOCK:
+            ike_frame = ADAPTER.ds2.ident(0x80, timeout=0.5)
+            if ike_frame:
+                ike_data = ds2_diag.body(ike_frame)
+                ike_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in ike_data)
+                vehicle_info["ike_ident"] = ike_str.strip()
+
+                # Try to parse model from ident
+                # E39 IKE ident format varies, but often contains model info
+                if "523" in ike_str:
+                    vehicle_info["model"] = "E39 523i"
+                    vehicle_info["engine"] = "M52TU"
+                elif "528" in ike_str:
+                    vehicle_info["model"] = "E39 528i"
+                    vehicle_info["engine"] = "M52TU"
+                elif "540" in ike_str:
+                    vehicle_info["model"] = "E39 540i"
+                    vehicle_info["engine"] = "M62"
+                else:
+                    vehicle_info["model"] = "E39"
+
+                # Parse year from VIN (10th character = year code)
+                if len(ADAPTER.vin) >= 10:
+                    year_char = ADAPTER.vin[9]
+                    # Simplified year parsing (W=1998, X=1999, Y=2000, etc.)
+                    year_map = {'W': 1998, 'X': 1999, 'Y': 2000, '1': 2001, '2': 2002, '3': 2003}
+                    vehicle_info["year"] = year_map.get(year_char, "Unknown")
+
+    elif ADAPTER.proto == "e87":
+        # chassis/protocol is genuinely known (that's what selected this
+        # Adapter class) -- trim/engine is NOT: this code path is shared by
+        # more than one physical E87 with different engines (see
+        # CLAUDE.md), and there's no KWP2000 engine-variant registry yet
+        # (unlike dme_registry.py for DS2/E39). Report the real DME ident
+        # text as evidence instead of a hardcoded model/engine/year guess
+        # -- that guess is exactly what mixed up two different cars' data
+        # in an earlier report.
+        vehicle_info["model"] = "E87"
+        vehicle_info["engine"] = None
+        vehicle_info["engine_evidence"] = "not auto-detected"
+        # vin above is now the confirmed real VIN once detect() has
+        # run (see E87Adapter.read_vin); vin_suffix is a
+        # display-only fallback for when only the partial read
+        # succeeded.
+        vehicle_info["vin_suffix"] = getattr(ADAPTER, "vin_suffix", None)
+        with CAR_LOCK:
+            vehicle_info["dme_ident"] = ADAPTER.dme_ident()
+
+    # Add transmission type (default unknown, can be enhanced)
+    vehicle_info["transmission"] = "Unknown"
+
+    # TODO: Read mileage from IKE (requires specific DS2 service)
+    vehicle_info["mileage_km"] = None
+
+    return vehicle_info
 
 
 def _current_operator():
@@ -1650,65 +1737,22 @@ class Handler(BaseHTTPRequestHandler):
             # Get vehicle information
             if not ADAPTER:
                 return self._json({"error": "not connected"}, 400)
-
-            # Gather vehicle info from adapter and modules
-            vehicle_info = {
-                "vin": ADAPTER.vin,
-                # generic across adapters: vin has been promoted from the
-                # placeholder once any adapter's read_vin() confirms a
-                # real one (see E39Adapter/E87Adapter.detect())
-                "vin_confirmed": ADAPTER.vin != "WBAXXXXXXXXXXXXXX",
-                "protocol": ADAPTER.proto,
-                "adapter_name": ADAPTER.name
-            }
-
-            # Try to get additional info from IKE ident (if E39)
-            if ADAPTER.proto == "e39" and hasattr(ADAPTER, 'ds2') and ADAPTER.ds2:
-                with CAR_LOCK:
-                    ike_frame = ADAPTER.ds2.ident(0x80, timeout=0.5)
-                    if ike_frame:
-                        ike_data = ds2_diag.body(ike_frame)
-                        ike_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in ike_data)
-                        vehicle_info["ike_ident"] = ike_str.strip()
-
-                        # Try to parse model from ident
-                        # E39 IKE ident format varies, but often contains model info
-                        if "523" in ike_str:
-                            vehicle_info["model"] = "E39 523i"
-                            vehicle_info["engine"] = "M52TU"
-                        elif "528" in ike_str:
-                            vehicle_info["model"] = "E39 528i"
-                            vehicle_info["engine"] = "M52TU"
-                        elif "540" in ike_str:
-                            vehicle_info["model"] = "E39 540i"
-                            vehicle_info["engine"] = "M62"
-                        else:
-                            vehicle_info["model"] = "E39"
-
-                        # Parse year from VIN (10th character = year code)
-                        if len(ADAPTER.vin) >= 10:
-                            year_char = ADAPTER.vin[9]
-                            # Simplified year parsing (W=1998, X=1999, Y=2000, etc.)
-                            year_map = {'W': 1998, 'X': 1999, 'Y': 2000, '1': 2001, '2': 2002, '3': 2003}
-                            vehicle_info["year"] = year_map.get(year_char, "Unknown")
-
-            elif ADAPTER.proto == "e87":
-                vehicle_info["model"] = "E87"
-                vehicle_info["year"] = 2005  # From VIN
-                # vin above is now the confirmed real VIN once detect() has
-                # run (see E87Adapter.read_vin); vin_suffix is a
-                # display-only fallback for when only the partial read
-                # succeeded.
-                vehicle_info["vin_suffix"] = getattr(ADAPTER, "vin_suffix",
-                                                     None)
-
-            # Add transmission type (default unknown, can be enhanced)
-            vehicle_info["transmission"] = "Unknown"
-
-            # TODO: Read mileage from IKE (requires specific DS2 service)
-            vehicle_info["mileage_km"] = None
-
-            self._json(vehicle_info)
+            self._json(gather_vehicle_info())
+        elif self.path == "/api/report_metadata":
+            # Trustworthy facts for anything (a session, a script) writing
+            # up a diagnostic report -- app build identity + real vehicle
+            # evidence + a live environmental snapshot, so a report is
+            # self-describing instead of relying on whoever wrote it to
+            # remember/guess which car and which app build it came from.
+            self._json({
+                "app_version": paths.app_version(),
+                "generated_at": now(),
+                "vehicle": gather_vehicle_info() if ADAPTER else None,
+                "environment": {
+                    "sampled_at": LIVE_LAST.get("t"),
+                    "values": LIVE_LAST.get("values", {}),
+                },
+            })
 
 
         elif self.path == "/api/backups":

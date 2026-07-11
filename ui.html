@@ -790,7 +790,10 @@ async function loadDashboard() {
         ? `...${v.vin_suffix} (confirmed serial; full VIN not read)`
         : (v.vin || "Unknown");
       $("vehicleyear").textContent = v.year || "Unknown";
-      $("vehicleengine").textContent = v.engine || "Unknown";
+      // E87 has no engine-variant auto-detection yet (see diag_ui.py's
+      // /api/vehicle) -- fall back to the raw DME ident text rather than
+      // showing "Unknown" when we actually have real (if unparsed) evidence.
+      $("vehicleengine").textContent = v.engine || v.dme_ident || "Unknown";
       $("vehicleprotocol").textContent = v.protocol || "Unknown";
     }
   } catch (e) {

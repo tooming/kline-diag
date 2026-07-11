@@ -55,3 +55,32 @@ def data_dir():
 def data_path(*parts):
     """Convenience: a path under data_dir()."""
     return os.path.join(data_dir(), *parts)
+
+
+def app_version():
+    """Best-effort build identifier, for stamping onto reports/exports so
+    they can be tied back to the exact code that produced them.
+
+    Frozen builds have no .git inside the bundle, so opendiag.spec bakes a
+    version.txt resource in at build time; running from source (the normal
+    dev case) always has .git available, so ask it directly instead of
+    relying on a stale baked-in file."""
+    if is_frozen():
+        try:
+            with open(os.path.join(resource_dir(), "version.txt")) as f:
+                return f.read().strip() or "unknown"
+        except OSError:
+            return "unknown"
+    import subprocess
+    try:
+        rev = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=_HERE,
+            capture_output=True, text=True, timeout=2).stdout.strip()
+        if not rev:
+            return "unknown"
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=_HERE,
+            capture_output=True, text=True, timeout=2).stdout.strip()
+        return rev + ("+dirty" if dirty else "")
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
