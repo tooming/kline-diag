@@ -345,14 +345,8 @@ class E39Adapter:
         return True
 
     def engine_info(self):
-        import verification
-        base = self.dme.get("evidence", "")
         return {"dme": self.dme.get("dme"), "engine": self.dme.get("engine"),
-                "evidence": verification.dme_evidence(
-                    self.vin, self.dme.get("dme"), base),
-                "base_evidence": base,
-                "verified": verification.is_verified(
-                    self.vin, self.dme.get("dme")),
+                "evidence": self.dme.get("evidence", ""),
                 "matched_part": self.dme.get("matched_part"),
                 "param_count": len(self._all_params)}
 
@@ -1071,102 +1065,10 @@ def log_vanos_event(event, s):
 # Event tracking state (for detecting transitions)
 EVENT_STATE = {
     "prev_profile": None,
-    "prev_gear": None,
     "prev_knock": 0,
     "prev_vanos": 0,
     "prev_health": {},
 }
-
-# Gear calibration state
-CALIBRATION = {"active": False, "gear": None, "samples": [],
-               "last_rpm": None, "last_speed": None, "last_throttle": None}
-
-# Default E39 523i manual transmission gear ratios (RPM/km/h) as initial guesses.
-# These will be overridden by calibrated values from gear_ratios.json if present.
-DEFAULT_GEAR_RATIOS = {
-    1: 110.0,  # 1st gear (rough placeholder — calibrate to replace)
-    2: 75.0,   # 2nd gear
-    3: 50.0,   # 3rd gear
-    4: 37.5,   # 4th gear
-    5: 30.0,   # 5th gear
-}
-
-
-def load_gear_ratios():
-    """Load calibrated gear ratios from file, or return defaults."""
-    path = os.path.join(HERE, "gear_ratios.json")
-    try:
-        with open(path) as f:
-            ratios = json.load(f)
-            # Convert string keys to ints
-            return {int(k): float(v) for k, v in ratios.items()}
-    except (OSError, json.JSONDecodeError, ValueError):
-        return DEFAULT_GEAR_RATIOS.copy()
-
-
-def save_gear_ratios(ratios):
-    """Save calibrated gear ratios to file."""
-    path = os.path.join(HERE, "gear_ratios.json")
-    with open(path, "w") as f:
-        json.dump(ratios, f, indent=2)
-
-
-GEAR_RATIOS = load_gear_ratios()
-
-
-def is_stable_for_calibration(rpm, speed, throttle, last_rpm, last_speed, last_throttle):
-    """Check if driving conditions are stable enough for gear calibration.
-
-    Returns: (is_stable, reason)
-    """
-    if speed < 20:
-        return False, "Speed too low (<20 km/h)"
-    if last_rpm is None:
-        return True, "First sample"
-
-    rpm_change = abs(rpm - last_rpm)
-    speed_change = abs(speed - last_speed)
-    throttle_change = abs(throttle - last_throttle) if last_throttle else 0
-
-    if rpm_change > 50:
-        return False, f"RPM unstable (Δ{rpm_change:.0f})"
-    if speed_change > 1:
-        return False, f"Speed unstable (Δ{speed_change:.1f})"
-    if throttle_change > 2:
-        return False, f"Throttle moving (Δ{throttle_change:.1f}%)"
-
-    return True, "Stable"
-
-
-def estimate_gear(rpm, speed_kmh):
-    """Estimate current gear from RPM and vehicle speed ratio.
-
-    Returns: (gear_num, confidence, ratio) or (None, 0, 0) if unable to determine.
-    Confidence considers ratio match + stability (future: add RPM/speed stability).
-    """
-    if not rpm or not speed_kmh or speed_kmh < 5:
-        return None, 0, 0
-
-    ratio = rpm / speed_kmh
-
-    # Find closest gear ratio
-    best_gear = None
-    best_diff = float('inf')
-    for gear, expected_ratio in GEAR_RATIOS.items():
-        diff = abs(ratio - expected_ratio)
-        if diff < best_diff:
-            best_diff = diff
-            best_gear = gear
-
-    # Confidence: 1.0 if perfect match, drops off with distance
-    # Allow wider tolerance for RPM fluctuations during steady driving
-    if best_gear:
-        expected = GEAR_RATIOS[best_gear]
-        deviation = best_diff / expected
-        confidence = max(0, 1.0 - deviation * 3)  # 33% deviation = 0 confidence
-        return best_gear, confidence, ratio
-
-    return None, 0, ratio
 
 
 def evaluate_health(values):
@@ -1179,18 +1081,9 @@ def evaluate_health(values):
 
     # Extract common values (handle both E39 and E87 parameter names)
     rpm = values.get("P8") or values.get("rpm")
-    speed_kmh = values.get("P9") or values.get("speed_kmh")
     throttle = values.get("P13") or values.get("throttle") or 0
     coolant = values.get("P2") or values.get("coolant_c")
     v_batt = values.get("P17") or values.get("battery_v")
-
-    # Gear estimation (only if we have speed)
-    if rpm and speed_kmh:
-        gear, confidence, ratio = estimate_gear(rpm, speed_kmh)
-        if gear and confidence > 0.3:
-            health["gear"] = {"color": "blue", "text": f"Gear {gear}", "value": f"{ratio:.1f}"}
-        elif speed_kmh > 5:
-            health["gear"] = {"color": "yellow", "text": "Gear unknown", "value": f"{ratio:.1f}"}
 
     # Battery / Charging
     if v_batt is not None:
@@ -1336,7 +1229,7 @@ def detect_pull(values):
     # Extract values, handling different param IDs across profiles (E39 DS2
     # MS41 profiles use P8/P13; the E87 KWP2000 channels use the plain
     # names -- same fallback pattern already used elsewhere in this file,
-    # e.g. record_row()'s gear estimate and evaluate_health()).
+    # e.g. evaluate_health()).
     throttle = values.get("P13") or values.get("throttle") or 0
     rpm = values.get("P8") or values.get("rpm") or 0
 
@@ -1471,13 +1364,6 @@ def record_row(values):
                 pull_id = str(num)
                 if event_type == "start":
                     event = "pull_start"
-                    # Include current gear if available
-                    rpm = values.get("P8") or values.get("rpm")
-                    speed = values.get("P9")
-                    if rpm and speed and speed > 5:
-                        gear, confidence, _ = estimate_gear(rpm, speed)
-                        if gear and confidence > 0.7:
-                            event_data_obj["gear"] = gear
                 elif event_type == "end":
                     event = "pull_end"
 
@@ -1824,36 +1710,6 @@ class Handler(BaseHTTPRequestHandler):
 
             self._json(vehicle_info)
 
-        elif self.path == "/api/modules/summary":
-            # Get summary of all modules (for dashboard ECU grid)
-            if not ADAPTER:
-                return self._json({"error": "not connected"}, 400)
-
-            with CAR_LOCK:
-                modules = ADAPTER.scan()
-
-            # Format summary with last scan timestamp
-            import time
-            summary = []
-            for m in modules:
-                # Extract part number and SW version from ident if possible
-                # For E39 DS2: format varies by module, ident_ascii often has part info
-                part_number = m.get("ident_ascii", "Unknown").strip()
-                sw_version = "Unknown"
-
-                # For DME specifically, ident_ascii is typically the part number
-                if m["name"].startswith("DME"):
-                    part_number = m.get("ident_ascii", "Unknown").strip()
-
-                summary.append({
-                    "addr": m["addr"],
-                    "name": m["name"],
-                    "part_number": part_number,
-                    "sw_version": sw_version,
-                    "last_scan": time.time()  # Current time as scan just happened
-                })
-
-            self._json({"modules": summary})
 
         elif self.path == "/api/backups":
             # List all backups for current VIN
@@ -2074,6 +1930,28 @@ class Handler(BaseHTTPRequestHandler):
                     rows = 0
                 out.append({"name": os.path.basename(p), "rows": rows})
             self._json(out)
+        elif self.path.startswith("/api/snapshot/"):
+            # Single snapshot's full detail (modules/faults/coding) for the
+            # "Snapshots" list's click-through -- /api/snapshots above only
+            # returns the summary row. Look the id up via list_snapshots()
+            # rather than trusting a client-supplied path directly, so this
+            # can't be pointed outside BACKUP_ROOT.
+            import snapshot as _snap
+            snap_id = urllib.parse.unquote(
+                self.path[len("/api/snapshot/"):]).split("?")[0]
+            vin = None
+            if "vin=" in self.path:
+                vin = self.path.split("vin=")[1].split("&")[0]
+            match = next((s for s in _snap.list_snapshots(vin)
+                         if s["id"] == snap_id), None)
+            if not match:
+                return self._json({"error": "snapshot not found"}, 404)
+            try:
+                data = _snap.load_snapshot(match["dir"])
+            except (OSError, ValueError) as e:
+                return self._json({"error": str(e)}, 500)
+            data["id"] = snap_id
+            self._json(data)
         elif self.path.startswith("/api/snapshots"):
             import snapshot as _snap
             vin = None
@@ -2615,107 +2493,7 @@ class Handler(BaseHTTPRequestHandler):
                 with CAR_LOCK:
                     result = ADAPTER.set_profile(profile)
                 self._json(result)
-            elif self.path == "/api/calibrate-gear":
-                b = self._body()
-                action = b.get("action")
-                if action == "start":
-                    gear = int(b.get("gear", 2))
-                    CALIBRATION.update(active=True, gear=gear, samples=[])
-                    self._json({"ok": True, "gear": gear, "samples": 0})
-                elif action == "capture":
-                    if not CALIBRATION["active"]:
-                        return self._json({"error": "calibration not active"}, 400)
-                    # Get current sample from live data
-                    if LIVE_LAST.get("ok") and LIVE_LAST.get("values"):
-                        v = LIVE_LAST["values"]
-                        # E39 (DS2 RAM param ids) or E87 (plain OBD PID names)
-                        rpm = v.get("P8") or v.get("rpm")
-                        speed = v.get("P9") or v.get("speed_kmh")
-                        throttle = v.get("P13") or v.get("throttle") or 0
-                        # speed can legitimately be 0 (stationary) — that's
-                        # still real data, `is_stable_for_calibration` below
-                        # reports "speed too low" for it, don't misreport it
-                        # as missing data
-                        if rpm is not None and speed is not None:
-                            # Check stability
-                            stable, reason = is_stable_for_calibration(
-                                rpm, speed, throttle,
-                                CALIBRATION.get("last_rpm"),
-                                CALIBRATION.get("last_speed"),
-                                CALIBRATION.get("last_throttle"))
-                            CALIBRATION.update(last_rpm=rpm, last_speed=speed,
-                                             last_throttle=throttle)
-                            if stable:
-                                ratio = rpm / speed
-                                CALIBRATION["samples"].append(ratio)
-                                self._json({"ok": True, "stable": True,
-                                           "samples": len(CALIBRATION["samples"]),
-                                           "ratio": round(ratio, 1)})
-                            else:
-                                self._json({"ok": True, "stable": False, "reason": reason})
-                        else:
-                            self._json({"error": "no RPM or speed data"}, 400)
-                    else:
-                        self._json({"error": "no live data available"}, 400)
-                elif action == "finish":
-                    if not CALIBRATION["active"] or not CALIBRATION["samples"]:
-                        return self._json({"error": "no samples captured"}, 400)
-                    gear = CALIBRATION["gear"]
-                    samples = CALIBRATION["samples"]
-                    mean_ratio = sum(samples) / len(samples)
-                    # Compute quality statistics
-                    variance = sum((s - mean_ratio) ** 2 for s in samples) / len(samples)
-                    std_dev = variance ** 0.5
-                    min_ratio = min(samples)
-                    max_ratio = max(samples)
-                    # Quality assessment
-                    if std_dev < 0.5:
-                        quality = "excellent"
-                    elif std_dev < 1.0:
-                        quality = "good"
-                    elif std_dev < 2.0:
-                        quality = "acceptable"
-                    else:
-                        quality = "poor"
-                    GEAR_RATIOS[gear] = round(mean_ratio, 1)
-                    save_gear_ratios(GEAR_RATIOS)
-                    CALIBRATION.update(active=False, gear=None, samples=[],
-                                      last_rpm=None, last_speed=None, last_throttle=None)
-                    self._json({"ok": True, "gear": gear,
-                               "ratio": round(mean_ratio, 1),
-                               "std_dev": round(std_dev, 2),
-                               "min": round(min_ratio, 1),
-                               "max": round(max_ratio, 1),
-                               "quality": quality,
-                               "all_ratios": GEAR_RATIOS})
-                elif action == "cancel":
-                    CALIBRATION.update(active=False, gear=None, samples=[])
-                    self._json({"ok": True})
-                elif action == "reset":
-                    GEAR_RATIOS.clear()
-                    GEAR_RATIOS.update(DEFAULT_GEAR_RATIOS)
-                    save_gear_ratios(GEAR_RATIOS)
-                    self._json({"ok": True, "ratios": GEAR_RATIOS})
-                elif action == "get":
-                    self._json({"ok": True, "ratios": GEAR_RATIOS,
-                               "calibrating": CALIBRATION["active"],
-                               "current_gear": CALIBRATION.get("gear"),
-                               "samples": len(CALIBRATION.get("samples", []))})
-                else:
-                    self._json({"error": "invalid action"}, 400)
             # --- Additive analysis endpoints (Agent-2, Phases 5/6/7) ---
-            elif self.path == "/api/compare":
-                import compare as _cmp
-                b = self._body()
-                # Recordings are written under DATA (paths.data_dir(), the
-                # writable dir), not HERE (paths.resource_dir(), read-only
-                # in a frozen build) -- the two happen to be the same
-                # directory in dev, which is what let this go unnoticed.
-                pa = os.path.join(DATA, os.path.basename(b.get("a", "")))
-                pb = os.path.join(DATA, os.path.basename(b.get("b", "")))
-                if not (os.path.isfile(pa) and os.path.isfile(pb)):
-                    return self._json({"error": "recording not found"}, 400)
-                self._json(_cmp.compare_recordings(pa, pb))
             elif self.path == "/api/correlate":
                 import correlate as _corr
                 b = self._body()
@@ -2809,24 +2587,6 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(_dc.send_raw(
                         ADAPTER, b.get("payload", []),
                         addr=int(b.get("addr", 0x12))))
-            elif self.path == "/api/engine/verify":
-                # Promote the current DME map sourced->verified. Requires
-                # plausible LIVE readings AND explicit user confirmation.
-                import verification
-                if not (ADAPTER and hasattr(ADAPTER, "engine_info")):
-                    return self._json({"error": "not connected"}, 400)
-                b = self._body()
-                vals = LIVE_LAST.get("values") or {}
-                if not vals:
-                    return self._json(
-                        {"error": "no live data — start live logging on a "
-                         "running engine first"}, 400)
-                info = ADAPTER.engine_info()
-                self._json(verification.record_verification(
-                    getattr(ADAPTER, "vin", "UNKNOWN"),
-                    info["dme"], info["engine"], vals,
-                    user_confirmed=bool(b.get("confirm")),
-                    note=b.get("note", "")))
             elif self.path == "/api/trace/parse":
                 # Protocol Explorer: parse a K-line trace file (offline).
                 import trace as _tr

@@ -17,7 +17,6 @@ datas = [(f, '.') for f in (
     'ui.html',
     'e39_body_dtc_en.json',
     'e87_dtc.json',
-    'gear_ratios.json',
     'ms41_dtc.json',
     'ms41_ram_params.json',
     'ms43_ram_params.json',
@@ -38,8 +37,8 @@ datas += [(certifi.where(), '.')]
 # PyInstaller's static analysis can't miss any.
 hiddenimports = [
     'diag_ui', 'power_diag', 'ds2_diag', 'transaction', 'coding',
-    'operations', 'dme_registry', 'verification', 'snapshot', 'adaptations',
-    'actuators', 'compare', 'correlate', 'plugins', 'vehicle_profiles',
+    'operations', 'dme_registry', 'snapshot', 'adaptations',
+    'actuators', 'correlate', 'plugins', 'vehicle_profiles',
     'trace', 'dev_console', 'paths',
 ]
 hiddenimports += ['ovpf_core', 'ovpf_producer', 'ovpf_cloud', 'segno',

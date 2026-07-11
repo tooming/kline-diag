@@ -229,20 +229,7 @@
         <div id="enginedme" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;display:none">
           <span style="color:var(--dim)">DME map:</span>
           <span id="dmename" style="font-weight:600">-</span>
-          <span id="dmegrade" class="pill" style="font-size:10px"></span>
-          <button id="verifybtn" style="font-size:11px;padding:2px 8px;margin-left:6px;display:none">Verify this map</button>
-          <div id="verifystat" class="muted" style="font-size:11px;margin-top:4px"></div>
         </div>
-      </div>
-      <div id="quickstatus" style="margin-bottom:10px">
-        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">STATUS</div>
-        <div class="health-grid" id="quickstatusitems">
-          <div class="muted">Connect to view status.</div>
-        </div>
-      </div>
-      <div id="ecugrid" style="margin-bottom:10px">
-        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;margin-bottom:6px">ECUS (<span id="ecucount">0</span>)</div>
-        <div id="eculist" class="muted">Scan modules to populate.</div>
       </div>
     </section>
     <section data-tab="passport" id="passportsec">
@@ -337,16 +324,6 @@
         <button id="readall">Read all faults</button>
       </div>
       <div id="modules"><div class="muted">Not scanned yet.</div></div>
-    </section>
-    <section data-tab="analysis" id="analysissec">
-      <h2>Analysis — Compare Drives</h2>
-      <div class="row" style="flex-wrap:wrap;gap:6px">
-        <select id="cmpA" style="font-size:12px;max-width:150px"></select>
-        <span class="muted">vs</span>
-        <select id="cmpB" style="font-size:12px;max-width:150px"></select>
-        <button id="cmprun" style="font-size:12px">Compare</button>
-      </div>
-      <div id="cmpfindings" style="margin-top:8px"></div>
     </section>
     <section data-tab="explorer" id="protocolsec">
       <h2>Protocol Explorer</h2>
@@ -610,7 +587,6 @@
           <option value="sensors">Sensors</option>
           <option value="vanos">VANOS</option>
         </select>
-        <button id="calibratebtn" style="display:none">⚙ Calibrate gears</button>
         <span id="livestat" class="muted"></span>
         <span id="ratestat" class="muted"></span>
       </div>
@@ -647,20 +623,6 @@
     </section>
   </div>
 </main>
-<div id="calmodal" class="modal">
-  <div class="modal-content">
-    <div class="modal-title" id="caltitle">Calibrate Gear Ratios</div>
-    <div class="modal-body" id="calbody">
-      <p>This wizard will capture your car's exact gear ratios.</p>
-      <p>For each gear, drive steadily at <code>2500-3000 RPM</code> and click <strong>Capture</strong>.</p>
-      <p>20-30 samples will be collected per gear.</p>
-    </div>
-    <div class="modal-buttons" id="calbuttons">
-      <button onclick="startCalibration(1)">Start with 1st gear</button>
-      <button onclick="closeCalModal()">Cancel</button>
-    </div>
-  </div>
-</div>
 <script>
 "use strict";
 const $ = id => document.getElementById(id);
@@ -706,10 +668,6 @@ function setState(s) {
   // so the tab shouldn't be gated behind one either.
   $("devsec").style.display = s.connected ? "" : "none";  // Show developer mode when connected
 
-  // Gear calibration only needs live rpm+speed, which both E39 and E87
-  // provide — show it for any connected car, not just E39.
-  $("calibratebtn").style.display = s.connected ? "" : "none";
-
   // show profile selector only for E39 (multiple logging profiles)
   const profileSel = $("profilesel");
   const profStats = $("profstats");
@@ -749,7 +707,6 @@ function setState(s) {
   loadDashboard();  // Load dashboard when state changes
   loadSnapshots();  // Load snapshots when state changes
   loadProtocolExplorer();  // Protocol Explorer summary
-  loadAnalysis();  // Compare-drives panel
   showRam();  // RAM Explorer visibility
 }
 
@@ -840,7 +797,7 @@ async function loadDashboard() {
     console.error("Failed to load vehicle info:", e);
   }
 
-  // Engine/DME detection + evidence grade + verify control
+  // Engine/DME detection
   try {
     const eng = await api("/api/engine");
     const d = eng.detected;
@@ -848,43 +805,10 @@ async function loadDashboard() {
     if (d && d.dme) {
       box.style.display = "";
       $("dmename").textContent = `${d.engine} / ${d.dme} (${d.param_count} params)`;
-      const grade = $("dmegrade");
-      grade.textContent = d.verified ? "car-verified" : (d.base_evidence || "sourced");
-      grade.className = "pill " + (d.verified ? "clean" : "unk");
-      // offer verify only when not yet verified and live data is flowing
-      $("verifybtn").style.display = d.verified ? "none" : "";
     } else {
       box.style.display = "none";
     }
   } catch (e) { /* engine endpoint optional */ }
-
-  // Load modules summary
-  try {
-    const m = await api("/api/modules/summary");
-    if (!m.error && m.modules) {
-      $("ecucount").textContent = m.modules.length;
-      const list = $("eculist");
-      list.innerHTML = "";
-      for (const mod of m.modules) {
-        const item = document.createElement("div");
-        item.style.cssText = "padding:6px 8px;margin-bottom:4px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px";
-        item.innerHTML = `
-          <div style="font-weight:600;margin-bottom:2px">${mod.name}</div>
-          <div style="color:var(--dim);display:grid;grid-template-columns:auto 1fr;gap:6px">
-            <span>Addr:</span><span>0x${mod.addr.toString(16).toUpperCase()}</span>
-            <span>Part:</span><span style="font-family:monospace;font-size:10px">${mod.part_number}</span>
-          </div>
-        `;
-        list.appendChild(item);
-      }
-    }
-  } catch (e) {
-    console.error("Failed to load modules summary:", e);
-  }
-
-  // Quick status - show basic health indicators if available
-  const statusItems = $("quickstatusitems");
-  statusItems.innerHTML = '<div class="health-item"><div class="health-dot green"></div><div class="health-text"><div class="health-label">CONNECTION</div><div class="health-value">Connected</div></div></div>';
 }
 
 async function loadSnapshots() {
@@ -938,11 +862,13 @@ async function showSnapshotDetail(snapId) {
     modal.style.display = "flex";
 
     let modulesHtml = "";
-    for (const mod of snap.modules) {
+    for (const mod of Object.values(snap.modules)) {
+      const faultCount = mod.faults && mod.faults.count != null ? mod.faults.count :
+        (mod.faults && mod.faults.error ? "?" : 0);
       modulesHtml += `
         <div style="padding:8px;background:var(--panel2);border-radius:4px;margin-bottom:6px">
           <div style="font-weight:600;margin-bottom:4px">${mod.name} (0x${mod.addr.toString(16).toUpperCase()})</div>
-          <div style="font-size:11px;color:var(--dim)">Faults: ${mod.fault_count} • Ident: ${mod.ident}</div>
+          <div style="font-size:11px;color:var(--dim)">Faults: ${faultCount} • Ident: ${mod.ident_ascii || mod.ident}</div>
         </div>
       `;
     }
@@ -954,7 +880,7 @@ async function showSnapshotDetail(snapId) {
           <strong>Description:</strong> ${snap.description || '(none)'}<br>
           <strong>Timestamp:</strong> ${snap.timestamp}<br>
           <strong>VIN:</strong> ${snap.vin}<br>
-          <strong>Modules:</strong> ${snap.modules.length}<br>
+          <strong>Modules:</strong> ${snap.module_count}<br>
           <strong>Total Faults:</strong> ${snap.total_faults}
         </div>
         <div style="max-height:300px;overflow-y:auto">${modulesHtml}</div>
@@ -2048,7 +1974,6 @@ function updateHealth(health) {
 
   // Always show same set of boxes (stable layout)
   const allIndicators = [
-    {key: "gear", label: "Gear", default: {color: "blue", text: "—", value: ""}},
     {key: "charging", label: "Charging", default: {color: "blue", text: "—", value: ""}},
     {key: "coolant", label: "Coolant", default: {color: "blue", text: "—", value: ""}},
     {key: "iat", label: "Intake Air", default: {color: "blue", text: "—", value: ""}},
@@ -3380,25 +3305,6 @@ $("snapcreate").onclick = async () => {
   }
 };
 
-// ---- Verify DME map (sourced -> car-verified) ----
-$("verifybtn").onclick = async () => {
-  if (!es) {
-    $("verifystat").textContent = "Start live logging on a warm, running engine first.";
-    return;
-  }
-  if (!confirm("Confirm this engine's live values match the physical gauges" +
-      " (coolant vs temp gauge, RPM vs tacho)?\n\nOnly confirm if they agree" +
-      " — this promotes the parameter map to car-verified for this VIN.")) return;
-  $("verifystat").textContent = "checking plausibility…";
-  const r = await api("/api/engine/verify", { confirm: true, note: "user confirmed vs gauges" });
-  if (r.verified) {
-    $("verifystat").innerHTML = '<span style="color:var(--ok)">✓ map car-verified and saved</span>';
-    loadDashboard();
-  } else {
-    $("verifystat").textContent = "not verified: " + (r.blocked_reason || r.error || "unknown");
-  }
-};
-
 // ---- Protocol Explorer: operation database browser ----
 async function loadProtocolExplorer() {
   const sec = $("protocolsec");
@@ -3501,46 +3407,6 @@ $("ramdiff").onclick = async () => {
       `<span style="color:var(--dim)">${d.a} → ${d.b}</span>` +
       `<span style="color:${dir}">Δ${d.delta > 0 ? "+" : ""}${d.delta}</span>`;
     box.appendChild(row);
-  }
-};
-
-// ---- Analysis: compare two drive recordings ----
-async function loadAnalysis() {
-  const sec = $("analysissec");
-  if (!state.connected) { sec.style.display = "none"; return; }
-  sec.style.display = "";
-  try {
-    const recs = await api("/api/recordings");
-    const a = $("cmpA"), b = $("cmpB");
-    if (a.options.length === 0 && recs.length) {
-      for (const r of recs) {
-        a.add(new Option(`${r.name} (${r.rows})`, r.name));
-        b.add(new Option(`${r.name} (${r.rows})`, r.name));
-      }
-      if (recs.length > 1) b.selectedIndex = 1;
-    }
-  } catch (e) { /* recordings optional */ }
-}
-
-$("cmprun").onclick = async () => {
-  const box = $("cmpfindings");
-  const a = $("cmpA").value, b = $("cmpB").value;
-  if (!a || !b) { box.innerHTML = '<div class="muted">pick two recordings</div>'; return; }
-  box.innerHTML = '<div class="muted">comparing…</div>';
-  const r = await api("/api/compare", { a, b });
-  if (r.error) { box.innerHTML = `<div class="muted">${r.error}</div>`; return; }
-  if (!r.findings || !r.findings.length) {
-    box.innerHTML = '<div class="muted">No significant differences (>5%) between the runs.</div>';
-    return;
-  }
-  const mark = { improvement: ["var(--ok)", "▲"], regression: ["var(--err)", "▼"], note: ["var(--dim)", "•"] };
-  box.innerHTML = "";
-  for (const f of r.findings) {
-    const [color, sym] = mark[f.type] || ["var(--fg)", "·"];
-    const d = document.createElement("div");
-    d.style.cssText = "padding:6px 8px;margin-bottom:4px;background:var(--panel2);border-left:3px solid " + color + ";border-radius:4px;font-size:12px";
-    d.innerHTML = `<span style="color:${color};font-weight:700">${sym} ${f.subsystem}</span> — ${f.description}`;
-    box.appendChild(d);
   }
 };
 
@@ -3866,115 +3732,6 @@ async function pollLog() {
     }
   } catch (e) { /* server away */ }
   setTimeout(pollLog, 700);
-}
-
-// ---- gear calibration ----
-let calInterval = null;
-
-function ordinal(n) {
-  if (n % 10 === 1 && n % 100 !== 11) return `${n}st`;
-  if (n % 10 === 2 && n % 100 !== 12) return `${n}nd`;
-  if (n % 10 === 3 && n % 100 !== 13) return `${n}rd`;
-  return `${n}th`;
-}
-
-$("calibratebtn").onclick = () => {
-  $("calmodal").style.display = "flex";
-};
-
-function closeCalModal() {
-  $("calmodal").style.display = "none";
-  if (calInterval) {
-    clearInterval(calInterval);
-    calInterval = null;
-    api("/api/calibrate-gear", { action: "cancel" });
-  }
-}
-
-async function startCalibration(gear) {
-  const r = await api("/api/calibrate-gear", { action: "start", gear });
-  if (!r.ok) { alert("Failed to start calibration"); return; }
-
-  $("caltitle").textContent = `Calibrating Gear ${gear}`;
-  $("calbody").innerHTML = `
-    <p>Drive steadily in <strong>${ordinal(gear)} gear</strong> at <strong>2500-3000 RPM</strong>.</p>
-    <p>Samples captured: <span id="calsamples">0</span> / 25</p>
-    <p>Current ratio: <span id="calratio">—</span></p>
-    <p id="calstatus" class="muted" style="font-size:12px">⚪ Waiting for stable conditions...</p>
-  `;
-  $("calbuttons").innerHTML = `
-    <button class="primary" onclick="captureCalSample()">⏺ Capture (auto)</button>
-    <button onclick="finishGear(${gear})">Next gear →</button>
-    <button onclick="closeCalModal()">Cancel</button>
-  `;
-
-  // Auto-capture every 500ms
-  calInterval = setInterval(captureCalSample, 500);
-}
-
-async function captureCalSample() {
-  const r = await api("/api/calibrate-gear", { action: "capture" });
-  if (r.ok) {
-    if (r.stable) {
-      $("calsamples").textContent = r.samples;
-      $("calratio").textContent = r.ratio;
-      $("calstatus").innerHTML = "🟢 Sample captured";
-      $("calstatus").style.color = "var(--ok)";
-      if (r.samples >= 25) {
-        // Auto-advance after 25 samples
-        clearInterval(calInterval);
-        calInterval = null;
-        const gear = parseInt($("caltitle").textContent.match(/\d+/)[0]);
-        setTimeout(() => finishGear(gear), 500);
-      }
-    } else {
-      $("calstatus").innerHTML = `⚪ ${r.reason || "Waiting for stable conditions..."}`;
-      $("calstatus").style.color = "var(--dim)";
-    }
-  }
-}
-
-async function finishGear(gear) {
-  if (calInterval) {
-    clearInterval(calInterval);
-    calInterval = null;
-  }
-
-  const r = await api("/api/calibrate-gear", { action: "finish" });
-  if (!r.ok) { alert("Failed to save gear data"); return; }
-
-  // Show quality summary
-  const qualityColor = r.quality === "excellent" ? "var(--ok)" :
-                       r.quality === "good" ? "var(--ok)" :
-                       r.quality === "acceptable" ? "var(--warn)" : "var(--err)";
-  const qualityIcon = r.quality === "excellent" || r.quality === "good" ? "🟢" :
-                      r.quality === "acceptable" ? "🟡" : "🔴";
-
-  $("caltitle").textContent = `Gear ${gear} Complete`;
-  $("calbody").innerHTML = `
-    <p><strong>Ratio: ${r.ratio}</strong></p>
-    <p style="font-size:12px;color:var(--dim)">
-      σ = ${r.std_dev} • Range: ${r.min} - ${r.max}
-    </p>
-    <p style="color:${qualityColor}">${qualityIcon} Quality: ${r.quality}</p>
-  `;
-
-  if (gear < 5) {
-    // Continue to next gear
-    $("calbuttons").innerHTML = `
-      <button class="primary" onclick="startCalibration(${gear + 1})">Next: Gear ${gear + 1}</button>
-      <button onclick="closeCalModal()">Finish early</button>
-    `;
-  } else {
-    // Done with all gears
-    $("caltitle").textContent = "Calibration Complete";
-    $("calbody").innerHTML = `
-      <p>✓ All gears calibrated successfully!</p>
-      <p>Gear ratios saved:</p>
-      <ul>${Object.entries(r.all_ratios).map(([g,v]) => `<li>Gear ${g}: ${v}</li>`).join('')}</ul>
-    `;
-    $("calbuttons").innerHTML = `<button onclick="closeCalModal()">Done</button>`;
-  }
 }
 
 // ---- Tab navigation ----
