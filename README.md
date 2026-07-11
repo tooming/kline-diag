@@ -285,6 +285,10 @@ writes logs/backups to a per-user folder (`%APPDATA%\BMWDiag` on Windows,
   tables
 - `ms41_ram_params.json`, `ms43_ram_params.json` — live-data parameter maps
 - `transaction.py`, `coding.py` — read→backup→write→verify→rollback layer
+- `report.py` — offline diagnostic report generator: `python3 report.py
+  drive_log_*.csv [--vin VIN] [--out NAME]` writes `NAME.md`/`NAME.json`
+  (vehicle info, stored fault codes, per-pull stats) from already-recorded
+  data — data tables only, paste the `.md` into an LLM chat for findings
 
 Generated at runtime (git-ignored, kept out of the repo): `kline_raw.log`
 (every frame), `fault_snapshots.log` (pre-clear snapshots), `backups/`
