@@ -916,6 +916,71 @@ LIVE_LAST = {}
 # derive them on demand from maf+rpm wherever they're needed for display,
 # using the current formula.
 INFERRED_CHANNELS = {"power_kw", "torque_nm"}
+# CSV export column names -- the E39/DS2 side's channel ids are RomRaider-
+# style opaque codes (P8, P12, E2...) straight from ms41_ram_params.json,
+# meaningless without cross-referencing that file. E87/KWP2000 already
+# uses plain names (rpm, maf, throttle...) since its channel set is
+# hardcoded, not loaded from a RAM-address table -- this makes the E39
+# match it wherever a real semantic equivalent exists (rpm, maf, throttle,
+# iat_c, map_kpa -- chosen to exactly match ui.html's normalizeSample()
+# fallback names, so old and new CSVs both parse without it needing to
+# know which car wrote the file) and gives the rest (VANOS, knock, fuel
+# trims, switches) a real name instead of a bare id. Internal channel ids
+# (live_channels, live_sample()'s dict keys, SSE payloads) are completely
+# unaffected -- this only renames what gets WRITTEN to a CSV's header
+# row; record_row() still looks values up by the original id.
+E39_CSV_COLUMN_NAMES = {
+    "P8": "rpm", "P9": "speed_kmh", "P13": "throttle",
+    "P11": "iat_c", "P2": "coolant_c", "P10": "timing_advance",
+    "P17": "battery_v", "P7": "map_kpa", "P12": "maf",
+    "P18": "maf_voltage_v", "P19": "tps_voltage_v", "P21": "injector_pw_ms",
+    "P24": "atm_pressure_psi", "P58": "wbo2_afr",
+    "E2": "load_mgstroke", "E9": "iacv_pct",
+    "E11": "vanos_angle", "E13": "stft1", "E14": "stft2",
+    "E15": "o2_heater_front1", "E16": "o2_heater_front2",
+    "E17": "o2_heater_rear1", "E18": "o2_heater_rear2",
+    "E19": "idle_ft1_ms", "E20": "idle_ft2_ms",
+    "E21": "ltft1", "E22": "ltft2", "E23": "tps_adapt",
+    "E24": "knock_retard_global", "E99": "knock_adapt_table1",
+    "E100": "iat_voltage_v", "E101": "o2_front1_v", "E102": "o2_front2_v",
+    "E103": "ect_voltage_v", "E105": "zsr_voltage_v",
+    "E123": "knock1_voltage_v", "E124": "knock2_voltage_v",
+    "E125": "o2_rear1_v", "E126": "o2_rear2_v", "E127": "fuel_tank_pressure_v",
+    "E201": "iacv_alphan", "E202": "evap_pwm",
+    "E203": "load_switch", "E204": "knock_cyl1", "E205": "knock_cyl2",
+    "E206": "knock_cyl3", "E207": "knock_cyl4", "E208": "knock_cyl5",
+    "E209": "knock_cyl6", "E210": "vanos_status",
+    "E211": "geberrad_adaption", "E212": "tank_diff_pressure",
+    "E213": "timer_te_diag", "E214": "lambda_counter",
+    "E215": "timer_tl_sp_dte", "E216": "timer_nb_sp_dte",
+    "E85": "ff_ipw_pct", "E86": "ff_ign_deg", "E87": "oil_pressure_psi",
+    "E88": "fuel_pressure_psi", "E131": "ff_pct",
+    "S0": "ac_compressor", "S1": "ac_high_load", "S2": "theft_deterrent",
+    "S3": "torque_reduction_gearshift", "S4": "engine_drag_torque_reduction",
+    "S5": "torque_reduction_request", "S6": "full_load", "S7": "part_load",
+    "S8": "closed_throttle", "S9": "reg2", "S10": "reg1",
+    "S11": "trailing_throttle_fuel_cutoff", "S12": "accel_enrich",
+    "S13": "engine_start", "S14": "drive_engaged", "S15": "generator",
+    "S16": "can_switch", "S17": "secondary_air_valve",
+    "S18": "secondary_air_pump", "S19": "tank_ventilation_valve",
+    "S20": "rear_defogger", "S22": "exhaust_flap", "S23": "vanos_switch",
+    "S24": "compressor_relay", "S25": "fuel_pump",
+}
+# P12 (MAF) is kg/h on DS2/MS41 vs g/s everywhere else in this codebase
+# (E87's PID 0x10, and every physics/dyno calc) -- converting at write
+# time, under the "maf" name above, means a CSV never needs a reader to
+# know which protocol wrote it to interpret the MAF column correctly.
+E39_CSV_VALUE_TRANSFORMS = {"P12": lambda kgh: round(kgh * 1000 / 3600, 2)}
+
+
+def _csv_value(chan_id, values):
+    v = values.get(chan_id)
+    if v is None:
+        return ""
+    transform = E39_CSV_VALUE_TRANSFORMS.get(chan_id)
+    return transform(v) if transform else v
+
+
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
             "lock": threading.Lock()}
 CSV_QUEUE = queue.Queue(maxsize=1000)  # Buffer for CSV writer thread
@@ -1351,8 +1416,21 @@ def record_start():
         # project. A plain leading comment line, not a new column -- see
         # ui.html's parseCSV for the matching skip-and-parse.
         f.write(f"# vin: {ADAPTER.vin if ADAPTER else ''}\n")
+        # Descriptive column names instead of opaque PID codes (P8, P12...)
+        # -- see E39_CSV_COLUMN_NAMES. Falls back to the raw id for
+        # anything unmapped, and (defensively -- shouldn't happen with the
+        # current table) if a mapped name would collide with one already
+        # used in this exact header, since duplicate CSV column names
+        # would silently break header.indexOf()-style lookups downstream.
+        used, csv_names = set(), []
+        for i in ids:
+            name = E39_CSV_COLUMN_NAMES.get(i, i)
+            if name in used:
+                name = i
+            used.add(name)
+            csv_names.append(name)
         # Event columns: event, pull_id, event_data for extensible event system
-        f.write("time,epoch,event,pull_id,event_data," + ",".join(ids) + "\n")
+        f.write("time,epoch,event,pull_id,event_data," + ",".join(csv_names) + "\n")
         RECORDER.update(on=True, path=path, file=f, count=0, ids=ids)
         # Reset pull state when starting new recording
         PULL_STATE.update(active=False, counter=0, rpm_history=[])
@@ -1410,7 +1488,7 @@ def record_row(values):
         t = time.time()
         ts = time.strftime("%H:%M:%S", time.localtime(t)) + f".{int(t % 1 * 1000):03d}"
         row = [ts, f"{t:.3f}", event, pull_id, event_data]
-        row += [str(values.get(i, "")) for i in RECORDER["ids"]]
+        row += [str(_csv_value(i, values)) for i in RECORDER["ids"]]
         RECORDER["file"].write(",".join(row) + "\n")
         RECORDER["count"] += 1
 

@@ -2529,11 +2529,13 @@ function normalizeSample(t, values) {
   const iat_c = values.P11 ?? values.iat_c;
   const map_kpa = values.P7 ?? values.map_kpa;
   const throttle_pct = values.P13 ?? values.throttle;
-  // E39's load channel (E2) is mg/stroke, not a percentage like E87's
-  // engine_load -- genuinely different quantities, so the unit rides along
-  // rather than pretending they're comparable.
-  const load = values.E2 ?? values.engine_load;
-  const load_unit = values.E2 != null ? "mg/stroke"
+  // E39's load channel (E2, or "load_mgstroke" in a CSV recorded after
+  // record_start() started using descriptive column names) is mg/stroke,
+  // not a percentage like E87's engine_load -- genuinely different
+  // quantities, so the unit rides along rather than pretending they're
+  // comparable.
+  const load = values.E2 ?? values.load_mgstroke ?? values.engine_load;
+  const load_unit = (values.E2 != null || values.load_mgstroke != null) ? "mg/stroke"
     : values.engine_load != null ? "%" : null;
   return {
     t, rpm: rpm != null ? Number(rpm) : null,
