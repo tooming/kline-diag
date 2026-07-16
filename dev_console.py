@@ -72,13 +72,13 @@ def send_raw(adapter, payload, addr=0x12):
     allowed, reason = check_request(payload, protocol)
     if not allowed:
         return {"ok": False, "blocked": True, "reason": reason}
-    ds2 = getattr(adapter, "ds2", None)
-    if getattr(adapter, "name", "").startswith("DEMO") or ds2 is None:
+    transport = getattr(adapter, "ds2" if protocol == "ds2" else "kl", None)
+    if getattr(adapter, "name", "").startswith("DEMO") or transport is None:
         return {"ok": True, "demo": True,
                 "note": "request passed safety check (demo — not sent)",
                 "request": [f"0x{b:02X}" for b in payload]}
     if protocol == "ds2":
-        f = ds2.request(addr, payload, timeout=0.8)
+        f = transport.request(addr, payload, timeout=0.8)
         import ds2_diag
         return {"ok": f is not None,
                 "response": ds2_diag.hexs(f) if f is not None else None}
