@@ -666,6 +666,12 @@ class E87Adapter:
          "group": "Fuel", "graph": False},
         {"id": "o2_s4", "label": "O2 Sensor 4 (PID 0x17)", "unit": "V",
          "group": "Fuel", "graph": False},
+        # PID 0x03, decoded to text (open/closed loop) -- see live_sample(),
+        # handled outside _PID_CHANNELS since it isn't a round()-able number.
+        {"id": "fuel_status", "label": "Fuel System Status", "unit": "",
+         "group": "Fuel", "graph": False},
+        {"id": "mil_distance_km", "label": "Distance w/ MIL On", "unit": "km",
+         "group": "Engine", "graph": False},
     ]
     # PIDs confirmed supported by this car's DME (power_diag.py pids output);
     # channel id -> Mode-01 PID, decoded via obd2.decode_pid (same SAE J1979
@@ -677,11 +683,18 @@ class E87Adapter:
         # unverified -- see the map_kpa/baro_kpa/o2_s1..4 live_channels comments above
         "map_kpa": 0x0B, "baro_kpa": 0x33,
         "o2_s1": 0x14, "o2_s2": 0x15, "o2_s3": 0x16, "o2_s4": 0x17,
+        "mil_distance_km": 0x21,
     }
     def __init__(self):
         self.kl = KLine(rawlog_path=os.path.join(DATA, "kline_raw.log"))
         self.kl.log = log_hook(self.kl.log)
         self._live_init = False
+        # Instance copy -- live_channels is a class attribute (shared across
+        # every E87Adapter), and _label_o2_sensors() below relabels entries
+        # in place once the real hardware confirms which physical sensor
+        # each PID is. Mutating the class list directly would leak one car's
+        # confirmed layout into every future connection/instance.
+        self.live_channels = [dict(c) for c in E87Adapter.live_channels]
 
     def close(self):
         self.kl.close()
@@ -699,9 +712,35 @@ class E87Adapter:
             v = self.read_vin()          # full VIN, if confirmed
             if v:
                 self.vin = v      # promote placeholder -> confirmed real VIN
+            self._label_o2_sensors()
             self.kl.stop_comm(0x12)
             return True
         return False
+
+    def _label_o2_sensors(self):
+        """PID 0x13 (O2 sensors present) is a one-time hardware fact, not
+        live data -- read once here rather than every live_sample() cycle.
+        Resolves the ambiguity flagged on the o2_s1..4 live_channels entries
+        above: SAE J1979 PID 0x13's bitmap is bit0=Bank1Sensor1 (pre-cat),
+        bit1=Bank1Sensor2 (post-cat), ... bit7=Bank2Sensor4. Only relabels
+        the bits this DME actually sets -- if the bitmap ever disagrees with
+        the already-confirmed-live 0x14/0x15-only layout (see CLAUDE.md),
+        the untouched entries keep their generic "PID 0x1x" label rather
+        than guess."""
+        d = power_diag.obd_pid(self.kl, 0x13, 0x12, retries=0, timeout=0.3)
+        if not d:
+            return
+        bits = d[0]
+        names = {0: "Bank 1 Pre-Cat", 1: "Bank 1 Post-Cat",
+                 2: "Bank 1 Sensor 3", 3: "Bank 1 Sensor 4",
+                 4: "Bank 2 Pre-Cat", 5: "Bank 2 Post-Cat",
+                 6: "Bank 2 Sensor 3", 7: "Bank 2 Sensor 4"}
+        for i, loc in names.items():
+            if bits & (1 << i):
+                chan_id = f"o2_s{i + 1}"
+                for c in self.live_channels:
+                    if c["id"] == chan_id:
+                        c["label"] = f"O2 Sensor {i + 1} ({loc})"
 
     def read_vin(self):
         """KWP readECUIdentification, service 1A identifier 0x86 -- the
@@ -848,6 +887,14 @@ class E87Adapter:
             d = power_diag.obd_pid(self.kl, pid, 0x12, retries=0, timeout=0.3)
             if d:
                 s[chan_id] = round(obd2.decode_pid(pid, d), 2)
+        # PID 0x03 (fuel system status) decodes to text, not a number --
+        # kept out of _PID_CHANNELS' uniform round() loop above, same reason
+        # vanos_state is handled separately (see that live_channels comment).
+        d = power_diag.obd_pid(self.kl, 0x03, 0x12, retries=0, timeout=0.3)
+        if d:
+            txt = obd2.decode_fuel_system_status(d[0])
+            if txt:
+                s["fuel_status"] = txt
         if "maf" in s:
             pw, tq = estimate_power_torque(s["maf"], s.get("rpm") or 0)
             if pw is not None:

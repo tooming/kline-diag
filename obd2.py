@@ -24,11 +24,14 @@ MODE_CLEAR_DTC = 0x04
 MODE_VEHICLE_INFO = 0x09
 
 PID_NAMES = {
-    0x04: "engine load %", 0x05: "coolant temp C", 0x06: "short fuel trim %",
+    0x03: "fuel system status", 0x04: "engine load %",
+    0x05: "coolant temp C", 0x06: "short fuel trim %",
     0x07: "long fuel trim %", 0x0B: "intake manifold pressure kPa",
     0x0C: "RPM", 0x0D: "speed km/h",
     0x0E: "timing advance deg", 0x0F: "intake air temp C",
-    0x10: "MAF g/s", 0x11: "throttle %", 0x1F: "run time s",
+    0x10: "MAF g/s", 0x11: "throttle %", 0x13: "O2 sensors present",
+    0x1F: "run time s",
+    0x21: "distance w/ MIL on km",
     0x33: "barometric pressure kPa",
     0x42: "control module V", 0x5C: "oil temp C",
     0x14: "O2 sensor 1 V", 0x15: "O2 sensor 2 V",
@@ -36,6 +39,20 @@ PID_NAMES = {
     0x18: "O2 sensor 5 V", 0x19: "O2 sensor 6 V",
     0x1A: "O2 sensor 7 V", 0x1B: "O2 sensor 8 V",
 }
+
+# PID 0x03 fuel-system-status byte (bank 1) -> human text, per SAE J1979.
+FUEL_SYSTEM_STATUS = {
+    0x01: "open loop",
+    0x02: "closed loop",
+    0x04: "open loop (load/decel)",
+    0x08: "open loop (fault)",
+    0x10: "closed loop (O2 fault)",
+}
+
+
+def decode_fuel_system_status(byte):
+    """PID 0x03 bank-1 status byte -> human text, or None if unrecognized."""
+    return FUEL_SYSTEM_STATUS.get(byte)
 
 
 def decode_pid(pid, data):
@@ -61,6 +78,8 @@ def decode_pid(pid, data):
     if pid == 0x11 and data:
         return data[0] * 100.0 / 255.0
     if pid == 0x1F and len(data) >= 2:
+        return (data[0] << 8) | data[1]
+    if pid == 0x21 and len(data) >= 2:  # distance traveled with MIL on, km
         return (data[0] << 8) | data[1]
     if 0x14 <= pid <= 0x1B and data:  # SAE J1979: byte A = voltage/200, byte B (unused here) = per-bank STFT
         return round(data[0] / 200.0, 3)
