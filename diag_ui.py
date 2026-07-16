@@ -641,14 +641,19 @@ class E87Adapter:
          "group": "Engine", "graph": False},
         {"id": "baro_kpa", "label": "Barometric Pressure", "unit": "kPa",
          "group": "Engine", "graph": False},
-        # UNVERIFIED against real hardware, same as map_kpa/baro_kpa above --
-        # whether this DME answers PIDs 0x14-0x17 at all hasn't been tested.
-        # Labeled by raw PID slot, not by claimed bank/pre-post-cat position:
-        # SAE J1979 splits O2 sensor location across two possible bitmap
-        # configs (PID 0x13 vs 0x1D), and this DME's config isn't confirmed.
-        # Once `power_diag.py pids` (or a live scan) shows which of these
-        # respond, cross-reference PID 0x13's presence bitmap to relabel the
-        # ones that answer as e.g. "O2 Bank 1 Pre-Cat" -- relevant here since
+        # o2_s1/o2_s2 (PIDs 0x14/0x15) confirmed responding live at idle
+        # (voltage oscillating ~0.1-0.8V, healthy narrowband switching
+        # behavior). o2_s3/o2_s4 (0x16/0x17) confirmed absent from the same
+        # live sample -- this engine likely only has 2 O2 sensors (single
+        # bank, 4-cylinder: one pre-cat, one post-cat), not the 4 some
+        # multi-bank PID layouts assume. No PID here gives an actual
+        # lambda/AFR number -- these are narrowband switching sensors, not
+        # wideband, so voltage is all that's available (see CLAUDE.md).
+        # Still labeled by raw PID slot, not by claimed bank/pre-post-cat
+        # position: SAE J1979 splits O2 sensor location across two possible
+        # bitmap configs (PID 0x13 vs 0x1D), and this DME's config isn't
+        # confirmed. Once PID 0x13's presence bitmap is read, relabel the
+        # responding ones as e.g. "O2 Bank 1 Pre-Cat" -- relevant here since
         # a DME on this code path has stored 29F4/29F5 (Bank 1/2 catalyst
         # efficiency; see that car's local backups/<VIN>/ tree), and a
         # post-cat sensor bouncing 0.1-0.9V like the pre-cat one would
@@ -982,22 +987,23 @@ def _current_operator():
 _PUSH_LOCK = threading.Lock()
 
 
-def _auto_push(vin):
+def _auto_push(vin, urn=None):
     """Fire-and-forget cloud sync right after a local OVPF event is
     recorded, so nothing sits queued waiting for someone to click the
     dashboard's manual sync button. Best-effort like the record_* calls
     themselves: no session, offline, or a provider error just leaves the
     event queued for the next auto-push or manual sync -- never surfaced
     to the caller, never blocks the request or (if called with CAR_LOCK
-    held) the car."""
-    if not vin:
+    held) the car. `urn` lets a garage vehicle without a VIN yet resolve
+    to its passport (see ovpf_producer.resolve_log_path)."""
+    if not vin and not urn:
         return
 
     def _run():
         with _PUSH_LOCK:
             try:
                 import ovpf_cloud
-                ovpf_cloud.push_passport(vin)
+                ovpf_cloud.push_passport(vin, urn=urn)
             except Exception:
                 pass
     threading.Thread(target=_run, daemon=True).start()
@@ -2726,13 +2732,9 @@ class Handler(BaseHTTPRequestHandler):
                 # VehicleIdentified -- reduce() merges it into state.vehicle,
                 # the PassportOpened genesis event is never touched. Same
                 # "person is asserting this" contract as /service: no
-                # connection required, see _current_vin(). nickname here is
-                # the *shared* one (visible to anyone with the passport
-                # link, part of the permanent hash-chained history) --
-                # deliberately distinct from set_vehicle_name's local-only
-                # private label (see its docstring for the privacy
-                # rationale); the UI labels the two very differently for
-                # exactly this reason.
+                # connection required, see _current_vin(). The nickname is
+                # part of this permanent, hash-chained, cloud-synced fact
+                # set -- there's no separate local-only label.
                 b = self._body()
                 facts = {k: b[k] for k in ("nickname", "vin", "make", "model", "modelYear", "engine")
                           if b.get(k)}
@@ -2742,15 +2744,23 @@ class Handler(BaseHTTPRequestHandler):
                     _current_vin(), facts, operator=_current_operator())
                 _auto_push(_current_vin())
                 self._json(ev or {"note": "unchanged -- same facts already recorded"})
-            elif self.path == "/api/vehicle/name":
-                # Local-only nickname (see ovpf_producer.set_vehicle_name) --
-                # not an OVPF event, keyed by passport urn since a vehicle
-                # may not have a VIN yet. Blank name clears it.
+            elif self.path == "/api/garage/identify":
+                # Same as /api/passport/identify, but for a garage vehicle
+                # that isn't the one currently connected -- keyed by urn
+                # since it may not have a VIN yet (see
+                # ovpf_producer.record_vehicle_identified_by_urn).
                 b = self._body()
                 urn = (b.get("urn") or "").strip()
                 if not urn:
                     return self._json({"error": "urn required"}, 400)
-                self._json({"name": ovpf_producer.set_vehicle_name(urn, b.get("name"))})
+                facts = {k: b[k] for k in ("nickname", "vin", "make", "model", "modelYear", "engine")
+                          if b.get(k)}
+                if not facts:
+                    return self._json({"error": "at least one vehicle fact required"}, 400)
+                ev = ovpf_producer.record_vehicle_identified_by_urn(
+                    urn, facts, operator=_current_operator())
+                _auto_push(None, urn=urn)
+                self._json(ev or {"note": "unchanged -- same facts already recorded"})
             elif self.path == "/api/garage/hide":
                 # "Remove from garage" -- a hide, not a delete (see
                 # ovpf_producer.set_vehicle_hidden). Reversible via the

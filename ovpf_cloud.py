@@ -15,7 +15,7 @@ reverse-derived from the deployed page):
     verified with the provider -- this client can *check*
     verification status but can't add a DNS record for you.
 
-Sessions live in cloud_session.json (gitignored, like vehicle_names.json) --
+Sessions live in cloud_session.json (gitignored, like hidden_vehicles.json) --
 tokens never committed, never synced anywhere else.
 
 The provider's passport id is a bare UUID (its viewer mints one via

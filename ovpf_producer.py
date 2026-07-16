@@ -77,48 +77,10 @@ def _last_event(path, etype):
     return found
 
 
-# --- vehicle nickname (local-only, not an OVPF event) -----------------------
-# A personal label ("The E39", "Mom's daily") for the garage/passport UI --
-# distinct from VehicleIdentified facts (VIN/make/model/year), which are
-# immutable, hash-chained, and get pushed to cloud sync. A nickname is
-# neither a diagnostic fact nor something to broadcast on a shared vehicle
-# passport, so it's kept in its own local file, editable/overwritable at
-# will, and never touched by ovpf_cloud.
-
-def _vehicle_names_path():
-    return os.path.join(paths.data_dir(), "vehicle_names.json")
-
-
-def _load_vehicle_names():
-    try:
-        with open(_vehicle_names_path(), encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def get_vehicle_name(urn):
-    return _load_vehicle_names().get(urn) if urn else None
-
-
-def set_vehicle_name(urn, name):
-    """Set (or, if name is blank, clear) the nickname for a passport urn."""
-    names = _load_vehicle_names()
-    name = (name or "").strip()
-    if name:
-        names[urn] = name
-    else:
-        names.pop(urn, None)
-    with open(_vehicle_names_path(), "w", encoding="utf-8") as f:
-        json.dump(names, f)
-    return names.get(urn)
-
-
 # "Remove from garage" is a hide, not a delete -- the passport itself is a
 # hash-chained diagnostic log (see module docstring's tamper-evidence goal),
 # so unilaterally deleting it on a UI click would be destructive and
-# unrecoverable. Same local-only-JSON pattern as vehicle_names.json, just a
-# set of urns instead of a name map.
+# unrecoverable. Kept in its own local JSON file, a set of hidden urns.
 
 def _hidden_vehicles_path():
     return os.path.join(paths.data_dir(), "hidden_vehicles.json")
@@ -225,6 +187,15 @@ def record_coding_change(vin, addr, module_name, before, after, preset=None, ope
         urn, "EcuCodingChanged", data, _stamp_operator(PRODUCER, operator)))
 
 
+def _append_vehicle_identified(path, urn, facts, operator):
+    vehicle = {"type": "Vehicle", **facts}
+    prev = _last_event(path, "VehicleIdentified")
+    if prev and prev.get("data", {}).get("vehicle", {}) == vehicle:
+        return None
+    return ovpf_core.append(path, ovpf_core.envelope(
+        urn, "VehicleIdentified", {"vehicle": vehicle}, _stamp_operator(PRODUCER, operator)))
+
+
 def record_vehicle_identified(vin, facts, operator=None):
     """Append a `VehicleIdentified` letting a passport 'learn' its car.
     De-duped: unchanged facts since the last identification -> skip."""
@@ -233,12 +204,24 @@ def record_vehicle_identified(vin, facts, operator=None):
         return None
     with _WRITE_LOCK:
         path, urn = ensure_passport(vin)
-        vehicle = {"type": "Vehicle", **facts}
-        prev = _last_event(path, "VehicleIdentified")
-        if prev and prev.get("data", {}).get("vehicle", {}) == vehicle:
+        return _append_vehicle_identified(path, urn, facts, operator)
+
+
+def record_vehicle_identified_by_urn(urn, facts, operator=None):
+    """Same as record_vehicle_identified, but for a passport that already
+    exists and is only known by urn -- e.g. renaming a garage vehicle that
+    isn't the one currently connected. Unlike record_vehicle_identified,
+    this never mints a new passport -- uses _path_for_urn directly (NOT
+    resolve_log_path, which falls back to the vin-keyed path, i.e. the
+    "unknown" anonymous passport, for an urn that matches nothing)."""
+    facts = {k: v for k, v in (facts or {}).items() if v}
+    if not facts:
+        return None
+    with _WRITE_LOCK:
+        path = _path_for_urn(urn)
+        if not path:
             return None
-        return ovpf_core.append(path, ovpf_core.envelope(
-            urn, "VehicleIdentified", {"vehicle": vehicle}, _stamp_operator(PRODUCER, operator)))
+        return _append_vehicle_identified(path, urn, facts, operator)
 
 
 def record_odometer(vin, value, unit="KMT", source="obd", operator=None):
@@ -341,7 +324,7 @@ def passport_state(vin):
     state = ovpf_core.reduce(events)
     state["chain_ok"] = not ovpf_core.verify_chain(events)
     state["passport_urn"] = state.get("passport")
-    state["name"] = get_vehicle_name(state["passport_urn"])
+    state["name"] = state["vehicle"].get("nickname")
     return state
 
 
@@ -417,7 +400,7 @@ def passport_state_by_urn(urn):
     state = ovpf_core.reduce(events)
     state["chain_ok"] = not ovpf_core.verify_chain(events)
     state["passport_urn"] = state.get("passport")
-    state["name"] = get_vehicle_name(state["passport_urn"])
+    state["name"] = state["vehicle"].get("nickname")
     return state
 
 
@@ -445,7 +428,7 @@ def list_passports(include_hidden=False):
         is_hidden = state["passport_urn"] in hidden
         if is_hidden and not include_hidden:
             continue
-        state["name"] = get_vehicle_name(state["passport_urn"])
+        state["name"] = state["vehicle"].get("nickname")
         state["hidden"] = is_hidden
         out.append(state)
     return out

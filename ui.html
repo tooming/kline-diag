@@ -245,11 +245,6 @@
         <div class="row" style="gap:18px;align-items:flex-start;flex-wrap:wrap">
           <div style="flex:1;min-width:240px">
             <div id="pp_vehicle" style="font-size:19px;font-weight:600"></div>
-            <div class="row" style="gap:6px;align-items:center;margin:4px 0">
-              <input id="pp_name" placeholder="Name this vehicle (e.g. &quot;The E39&quot;)" style="flex:1;min-width:160px;font-size:12px">
-              <button id="pp_name_btn" style="font-size:11px">Save</button>
-            </div>
-            <div class="muted" style="font-size:10px;margin:0 0 4px">Private label, only visible to you here -- doesn't appear on the shared passport. Use "Vehicle info" below to set a nickname others see.</div>
             <div id="pp_meta" class="muted" style="font-size:12px;margin:4px 0 4px"></div>
             <div id="pp_url" style="font-size:12px;margin:0 0 12px"></div>
             <div id="pp_stats" style="display:flex;gap:10px;flex-wrap:wrap"></div>
@@ -262,7 +257,7 @@
         </div>
         <div id="pp_identify_section">
         <h3 style="margin:18px 0 6px;font-size:13px;color:var(--dim)">Vehicle info</h3>
-        <div class="muted" style="font-size:10px;margin:0 0 4px">Appends a permanent VehicleIdentified event -- visible to anyone with the passport link, including the nickname below (unlike the private label above).</div>
+        <div class="muted" style="font-size:10px;margin:0 0 4px">Nickname and facts here are permanent and visible to anyone with the passport link.</div>
         <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
           <input id="pp_nickname" placeholder="Nickname (shown on the shared passport)" style="flex:1;min-width:180px">
           <input id="pp_vin" placeholder="VIN (optional)" style="flex:1;min-width:140px">
@@ -3801,7 +3796,6 @@ function ppChip(label, value) {
     <div class="muted" style="font-size:10px">${label}</div>
     <div style="font-size:14px;font-weight:600">${value}</div></div>`;
 }
-let ppCurrentUrn = null;
 // Set to browse a garage vehicle's passport that isn't the connected car
 // (see openPassportFor()); null means "whatever's connected right now".
 // Routing uses the urn (the vehicle's actual stable identity) since a
@@ -3911,10 +3905,16 @@ async function loadPassport() {
   const desc = [v.modelYear, v.make, v.model].filter(Boolean).join(" ") || "Unknown vehicle";
   const descFull = desc + (v.engine ? ` · ${v.engine}` : "");
   $("pp_vehicle").textContent = s.name || descFull;
-  $("pp_name").value = s.name || "";
-  ppCurrentUrn = s.passport_urn || null;
   $("pp_meta").textContent = (s.name ? descFull + " · " : "") +
     (v.vin ? `VIN ${v.vin}` : "no VIN yet") + " · " + (s.passport_urn || "");
+  // Prefill from the current facts so this reads as "edit", not "add" --
+  // saving re-sends every field, keeping the cumulative VehicleIdentified
+  // facts (see ovpf_producer.record_vehicle_identified) all up to date.
+  $("pp_nickname").value = v.nickname || "";
+  $("pp_vin").value = v.vin || "";
+  $("pp_make").value = v.make || "";
+  $("pp_model").value = v.model || "";
+  $("pp_year").value = v.modelYear || "";
   $("pp_url").innerHTML = s.url ?
     `<a href="${wsEsc(s.url)}" target="_blank" rel="noopener">${wsEsc(s.url)}</a>` : "";
   const m = s.mileage;
@@ -4058,12 +4058,6 @@ async function ppScan() {
   } catch (e) { res.textContent = "Camera unavailable: " + e.message; wrap.style.display = ""; }
 }
 $("pp_scan").onclick = ppScan;
-$("pp_name_btn").onclick = async () => {
-  if (!ppCurrentUrn) return;
-  const name = $("pp_name").value.trim();
-  await api("/api/vehicle/name", { urn: ppCurrentUrn, name });
-  loadPassport();
-};
 $("pp_identify_btn").onclick = async () => {
   const result = $("pp_identify_result");
   const facts = {
@@ -4075,8 +4069,7 @@ $("pp_identify_btn").onclick = async () => {
   const r = await api("/api/passport/identify", facts);
   if (r.error) { result.textContent = "Error: " + r.error; return; }
   result.textContent = "Saved.";
-  $("pp_nickname").value = ""; $("pp_vin").value = ""; $("pp_make").value = ""; $("pp_model").value = ""; $("pp_year").value = "";
-  loadPassport();
+  loadPassport();  // re-fills the fields from the freshly-saved facts
 };
 $("pp_service_btn").onclick = async () => {
   const serviceType = $("pp_service_type").value.trim();
@@ -4184,8 +4177,8 @@ async function loadGarage() {
       </div>
       ${s.hidden ? "" : `
       <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
-        <input id="${rowId}_name" placeholder="Name this vehicle" value="${wsEsc(s.name || "")}" style="flex:1;min-width:140px;font-size:12px">
-        <button id="${rowId}_name_btn" style="font-size:11px">Save name</button>
+        <input id="${rowId}_name" placeholder="Nickname (shown on the shared passport)" value="${wsEsc(s.name || "")}" style="flex:1;min-width:140px;font-size:12px">
+        <button id="${rowId}_name_btn" style="font-size:11px">Save nickname</button>
       </div>
       ${vin ? `
       <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
@@ -4216,8 +4209,9 @@ async function loadGarage() {
     };
     $(`${rowId}_name_btn`).onclick = async () => {
       if (!urn) return;
-      const name = $(`${rowId}_name`).value.trim();
-      await api("/api/vehicle/name", { urn, name });
+      const nickname = $(`${rowId}_name`).value.trim();
+      if (!nickname) return;
+      await api("/api/garage/identify", { urn, nickname });
       loadGarage();
     };
     if (!vin) return;
