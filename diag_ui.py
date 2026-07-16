@@ -1206,11 +1206,15 @@ def evaluate_health(values):
     coolant = values.get("P2") or values.get("coolant_c")
     v_batt = values.get("P17") or values.get("battery_v")
 
-    # Battery / Charging
+    # Battery / Charging. 13.5-14.8V is normal alternator output, including
+    # cold-battery/post-startup/temperature-compensated regulation up to
+    # ~14.8V - don't flag that range (see CLAUDE.md health tuning notes).
     if v_batt is not None:
-        if 13.6 <= v_batt <= 14.6:
+        if 13.5 <= v_batt <= 14.8:
             health["charging"] = {"color": "green", "text": "Charging OK", "value": f"{v_batt:.1f}V"}
-        elif 13.0 <= v_batt < 13.6 or 14.6 < v_batt <= 15.0:
+        elif 13.2 <= v_batt < 13.5 or 14.8 < v_batt <= 15.0:
+            health["charging"] = {"color": "blue", "text": "Voltage slightly off", "value": f"{v_batt:.1f}V"}
+        elif 12.8 <= v_batt < 13.2 or 15.0 < v_batt <= 15.3:
             health["charging"] = {"color": "yellow", "text": "Voltage borderline", "value": f"{v_batt:.1f}V"}
         else:
             health["charging"] = {"color": "red", "text": "Voltage abnormal", "value": f"{v_batt:.1f}V"}
