@@ -145,6 +145,12 @@ MS41_PROFILES = {
         ("P12", "MAF", "Airflow", False),
         ("E9", "IACV", "Idle", False),
         ("E202", "Purge PWM", "Fuel", False),
+        # Present in ms41_ram_params.json (and already named in
+        # E39_CSV_COLUMN_NAMES) but never included in any profile before --
+        # oil/fuel pressure are meaningful health signals that simply
+        # weren't being streamed.
+        ("E87", "Oil Pressure", "Pressures", True),
+        ("E88", "Fuel Pressure", "Pressures", True),
     ],
     "vanos": [
         ("P8", "RPM", "Engine", True),
@@ -163,13 +169,128 @@ MS41_PROFILES = {
     ],
 }
 
+# Live channel profiles for the MS43 (M54) DME -- a genuinely different chip
+# from MS41/M52 above: dual VANOS (separate intake E11 + exhaust E12 cam
+# adjusters, vs. M52's single cam), drive-by-wire throttle (P96 pedal vs
+# P13 throttle plate, no IACV), per-bank lambda trims/O2 sensors, per-
+# cylinder ignition timing (P10/P112-116), and an automatic-transmission
+# gear signal (E218). Most MS41 channel ids (P21 injector PW, E217 knock
+# retard, E9 IACV, E15/E16 O2 heaters, E204-209 per-cylinder knock, E210
+# VANOS raw, S23 as a VANOS command bit) simply don't exist under those ids
+# in ms43_ram_params.json -- reusing MS41_PROFILES against an MS43 car
+# silently drops most channels instead of erroring, so this needs its own
+# table, not a shared one. Sourced from ms43_ram_params.json (RomRaider def,
+# "not car-verified" per dme_registry.py) -- channel counts mirror MS41's
+# rough ~18-channel practical limit as a starting point, unconfirmed on
+# real MS43 hardware; trim if live streaming proves unreliable at this size.
+MS43_PROFILES = {
+    "driveability": [
+        ("P8", "RPM", "Engine", True),
+        ("P9", "Vehicle Speed", "Engine", True),
+        ("P13", "Throttle", "Engine", True),
+        ("E2", "Load", "Engine", True),
+        ("P12", "MAF", "Airflow", True),
+        ("P18", "MAF Voltage", "Airflow", False),
+        ("P99", "Injector PW", "Fuel", True),
+        ("E13", "Lambda Trim Bank 1", "Fuel Trim", True),
+        ("E14", "Lambda Trim Bank 2", "Fuel Trim", True),
+        ("E21", "Lambda Adapt Bank 1", "Fuel Trim", False),
+        ("E22", "Lambda Adapt Bank 2", "Fuel Trim", False),
+        ("P10", "Ignition Advance (Cyl 1)", "Ignition", True),
+        ("E27", "Knock", "Ignition", True),
+        ("E11", "VANOS Intake", "VANOS", True),
+        ("E12", "VANOS Exhaust", "VANOS", True),
+        ("P2", "Coolant Temp", "Temps", False),
+        ("P11", "Intake Temp", "Temps", False),
+        ("P17", "Battery", "Electrical", True),
+        ("E218", "Gear", "Transmission", False),
+    ],
+    "fuel": [
+        ("P8", "RPM", "Engine", True),
+        ("P13", "Throttle", "Engine", True),
+        ("E2", "Load", "Engine", False),
+        ("P12", "MAF", "Airflow", True),
+        ("P99", "Injector PW", "Fuel", True),
+        ("E13", "Lambda Trim Bank 1", "Fuel Trim", True),
+        ("E14", "Lambda Trim Bank 2", "Fuel Trim", True),
+        ("E19", "Lambda Adapt (Additive) Bank 1", "Fuel Trim", False),
+        ("E20", "Lambda Adapt (Additive) Bank 2", "Fuel Trim", False),
+        ("E21", "Lambda Adapt Bank 1", "Fuel Trim", True),
+        ("E22", "Lambda Adapt Bank 2", "Fuel Trim", True),
+        ("E1229", "Front O2 Voltage Bank 1", "O2 Sensors", True),
+        ("E1330", "Front O2 Voltage Bank 2", "O2 Sensors", True),
+        ("E129", "Rear O2 Voltage Bank 1", "O2 Sensors", True),
+        ("E130", "Rear O2 Voltage Bank 2", "O2 Sensors", True),
+        ("E24", "RON Fuel Quality", "Fuel", False),
+    ],
+    "knock": [
+        ("P8", "RPM", "Engine", True),
+        ("E2", "Load", "Engine", True),
+        ("P13", "Throttle", "Engine", False),
+        ("P10", "Ignition Cyl 1", "Cylinders", True),
+        ("P112", "Ignition Cyl 2", "Cylinders", True),
+        ("P113", "Ignition Cyl 3", "Cylinders", True),
+        ("P114", "Ignition Cyl 4", "Cylinders", True),
+        ("P115", "Ignition Cyl 5", "Cylinders", True),
+        ("P116", "Ignition Cyl 6", "Cylinders", True),
+        ("E27", "Knock Retard", "Knock", True),
+        ("E127", "Knock Sensor 1 Voltage", "Knock", False),
+        ("E128", "Knock Sensor 2 Voltage", "Knock", False),
+        ("E99", "Knock Adaptation", "Knock", False),
+    ],
+    "sensors": [
+        ("P8", "RPM", "Engine", False),
+        ("P13", "Throttle", "Engine", False),
+        ("P96", "Accelerator Position", "Engine", True),
+        ("P18", "MAF Voltage", "Voltages", True),
+        ("P19", "Throttle Voltage", "Voltages", True),
+        ("P17", "Battery Voltage", "Voltages", True),
+        ("E1229", "Front O2 Voltage Bank 1", "O2", True),
+        ("E1330", "Front O2 Voltage Bank 2", "O2", True),
+        ("P11", "IAT", "Temps", False),
+        ("P2", "ECT", "Temps", False),
+        ("P4", "Oil Temp", "Temps", True),
+        ("P12", "MAF", "Airflow", False),
+        ("P24", "Atmospheric Pressure", "Ambient", False),
+        ("E234", "Calculated MAP", "Engine", False),
+    ],
+    "vanos": [
+        ("P8", "RPM", "Engine", True),
+        ("P9", "Vehicle Speed", "Engine", True),
+        ("P13", "Throttle", "Engine", True),
+        ("E2", "Load", "Engine", True),
+        ("P12", "MAF", "Airflow", True),
+        ("P99", "Injector PW", "Fuel", True),
+        ("P10", "Ignition Advance", "Timing", True),
+        ("E27", "Knock", "Timing", True),
+        ("E11", "VANOS Intake", "VANOS", True),
+        ("E12", "VANOS Exhaust", "VANOS", True),
+        ("S42", "VANOS Active", "VANOS", False),
+        ("S43", "VANOS Ready", "VANOS", False),
+        ("S44", "VANOS Passive", "VANOS", False),
+        ("P2", "Coolant Temp", "Temps", True),
+        ("P11", "Intake Temp", "Temps", False),
+    ],
+}
+
+# Which profile table + expression overrides apply to a detected DME.
+# Falls back to MS41 for anything without its own entry (MS42/ME7.2 have no
+# param map at all per dme_registry.py, so this choice is moot for them --
+# _load_dme_params() already degrades to the MS41 id set in that case).
+PROFILES_BY_DME = {"MS41": MS41_PROFILES, "MS43": MS43_PROFILES}
+
 # The RomRaider expressions for switch params use BitWise()/! which our
 # safe-eval can't run — python-eval-able replacements, verified against the
 # XML semantics (S23: 0xFFC1 bit4, inverted -> 1 when VANOS commanded).
-EXPR_OVERRIDES = {
+# MS41-only: on MS43, id S23 is a completely different switch (DMTL evap
+# pump, not a VANOS command bit) -- applying this override there would
+# silently mislabel it, so overrides are looked up per-DME (see
+# EXPR_OVERRIDES_BY_DME) rather than by id alone.
+EXPR_OVERRIDES_MS41 = {
     "S23": ("0 if (x & 16) else 1", "cmd"),
     "E210": ("x", "raw"),
 }
+EXPR_OVERRIDES_BY_DME = {"MS41": EXPR_OVERRIDES_MS41}
 
 # Physics-based crank power/torque estimate from mass airflow -- one
 # formula for every petrol engine, no per-VIN/per-engine calibration
@@ -273,20 +394,27 @@ class E39Adapter:
         self._all_params = {p["id"]: p for p in plist}
 
     def _build_profile(self, profile):
-        """Build live_channels and logger from the given profile name."""
-        if profile not in MS41_PROFILES:
+        """Build live_channels and logger from the given profile name.
+
+        Which channel table and expression overrides apply depends on the
+        detected DME (self.dme, set by detect()) -- MS41/MS43 use different
+        param ids for the same concepts and MS43 reassigns some MS41 ids to
+        unrelated switches (see PROFILES_BY_DME/EXPR_OVERRIDES_BY_DME)."""
+        profile_table = PROFILES_BY_DME.get(self.dme.get("dme"), MS41_PROFILES)
+        overrides = EXPR_OVERRIDES_BY_DME.get(self.dme.get("dme"), {})
+        if profile not in profile_table:
             profile = "driveability"
         self.current_profile = profile
         self.live_channels = []
         params = []
         adc_count = 0
-        for pid, label, group, graph in MS41_PROFILES[profile]:
+        for pid, label, group, graph in profile_table[profile]:
             if pid not in self._all_params:
                 continue
             p = self._all_params[pid]
-            if pid in EXPR_OVERRIDES:
+            if pid in overrides:
                 p = dict(p)
-                p["expr"], p["units"] = EXPR_OVERRIDES[pid]
+                p["expr"], p["units"] = overrides[pid]
             # Count ADC reads (addresses < 0x1C use ADC procedure type)
             if int(p["addr"], 16) < 0x1C:
                 adc_count += 1
@@ -957,17 +1085,25 @@ def gather_vehicle_info():
 
                 # Try to parse model from ident
                 # E39 IKE ident format varies, but often contains model info
-                if "523" in ike_str:
-                    vehicle_info["model"] = "E39 523i"
-                    vehicle_info["engine"] = "M52TU"
-                elif "528" in ike_str:
-                    vehicle_info["model"] = "E39 528i"
-                    vehicle_info["engine"] = "M52TU"
-                elif "540" in ike_str:
-                    vehicle_info["model"] = "E39 540i"
-                    vehicle_info["engine"] = "M62"
+                for trim in ("518", "520", "523", "525", "528", "530",
+                             "535", "540"):
+                    if trim in ike_str:
+                        vehicle_info["model"] = f"E39 {trim}i"
+                        break
                 else:
                     vehicle_info["model"] = "E39"
+
+                # Engine comes from the DME's own ident (dme_registry,
+                # matched in E39Adapter.detect()), never guessed from the
+                # trim name -- a 523i/528i badge doesn't tell you MS41/M52
+                # vs MS42/M52TU, and guessing produced a wrong label here
+                # (dashboard showed "M52TU" for a car whose DME ident
+                # matches the MS41/M52 part-number list, disagreeing with
+                # the correct "DME map" field driven by the same detection).
+                if hasattr(ADAPTER, "engine_info"):
+                    info = ADAPTER.engine_info()
+                    vehicle_info["engine"] = info.get("engine")
+                    vehicle_info["engine_evidence"] = info.get("evidence")
 
                 # Parse year from VIN (10th character = year code)
                 if len(ADAPTER.vin) >= 10:
@@ -1309,11 +1445,19 @@ def evaluate_health(values):
         else:
             health["fuel"] = {"color": "red", "text": "Fuel trim high", "value": f"{max_trim:.1f}%"}
 
+    # A sample carrying MS43-only ids (dual-cam VANOS Exhaust, or any of its
+    # VANOS state switches) identifies an M54 car -- evaluate_health() gets
+    # no explicit DME/engine argument, so this is the same values-derived
+    # signal already used above to tell E39/E87 samples apart.
+    is_ms43 = "E12" in values or any(k in values for k in ("S42", "S43", "S44"))
+
     # MAF health (P12)
     maf = values.get("P12")
     if maf is not None and rpm is not None:
-        if rpm < 1000:
-            # M52 2.5L idle MAF should be ~15-22 kg/h
+        if rpm < 1000 and not is_ms43:
+            # M52 2.5L idle MAF should be ~15-22 kg/h -- not verified for
+            # the M54B22's larger, six-throttle-body airflow, so this band
+            # only applies when the sample isn't from an MS43 car.
             if 15 <= maf <= 22:
                 health["maf"] = {"color": "green", "text": "Idle airflow OK", "value": f"{maf:.1f} kg/h"}
             elif 12 <= maf < 15 or 22 < maf <= 28:
@@ -1321,7 +1465,8 @@ def evaluate_health(values):
             else:
                 health["maf"] = {"color": "red", "text": "Idle airflow abnormal", "value": f"{maf:.1f} kg/h"}
         else:
-            # Driving - just show value without health assessment
+            # Driving (or an MS43 car, any RPM) - just show the value, no
+            # health assessment against an unverified threshold.
             health["maf"] = {"color": "blue", "text": "MAF", "value": f"{maf:.1f} kg/h"}
     elif values.get("maf") is not None:
         # E87 OBD PID 0x10 reports g/s, not kg/h, and this is a different
@@ -1330,11 +1475,33 @@ def evaluate_health(values):
         health["maf"] = {"color": "blue", "text": "MAF",
                           "value": f"{values['maf']:.1f} g/s"}
 
-    # VANOS: command-vs-response when S23 is logged, else position-only.
-    # NOTE: single-VANOS cam RESTS at ~26.6° (raw 0x47) — "active" means the
-    # position DEPARTS from rest, not that it is nonzero.
+    # VANOS. Three cases, most to least specific:
+    #  - MS43/M54 dual-VANOS: the DME already exposes Active/Ready/Passive
+    #    state switches directly -- use those instead of reverse-engineering
+    #    a position heuristic, and report both cams (intake E11 + exhaust
+    #    E12; M52's single-cam rest-position math doesn't apply here).
+    #  - MS41/M52 single-VANOS: command-vs-response when S23 is logged.
+    #  - Otherwise: position-only heuristic against the learned rest angle.
     vanos = values.get("E11")
-    if "S23" in values and vanos is not None:
+    vanos_ex = values.get("E12")
+    if is_ms43 and vanos is not None:
+        active = values.get("S42")
+        ready = values.get("S43")
+        if active:
+            color, text = "green", "VANOS active"
+        elif ready:
+            color, text = "green", "VANOS ready"
+        elif ready is False:
+            color, text = "yellow", "VANOS not ready"
+        else:
+            color, text = "blue", "VANOS"
+        val = f"in {vanos:.1f}°"
+        if vanos_ex is not None:
+            val += f" / ex {vanos_ex:.1f}°"
+        health["vanos"] = {"color": color, "text": text, "value": val}
+    elif "S23" in values and vanos is not None:
+        # NOTE: single-VANOS cam RESTS at ~26.6° (raw 0x47) — "active" means
+        # the position DEPARTS from rest, not that it is nonzero.
         st = VANOS_MON.last_state
         color = {"ENGAGED": "green", "rest": "green", "engaging…": "blue",
                  "FAULT": "red", "moved w/o cmd?": "yellow"}.get(st, "blue")
@@ -1354,9 +1521,15 @@ def evaluate_health(values):
         else:
             health["vanos"] = {"color": "green", "text": "VANOS idle", "value": f"{vanos:.0f}°"}
 
-    # Knock retard (E217 or E24)
+    # Knock retard: MS41 uses E217 (falling back to E24 "Global Knock
+    # Retard"). MS43 reassigns id E24 to "RON Fuel Quality" (a % value, not
+    # degrees of retard) -- E27 "Knock" is MS43's equivalent instead, so the
+    # E24 fallback must not apply to an MS43 sample or it reads a fuel-
+    # quality percentage as if it were a knock-retard angle.
     knock = values.get("E217")
-    if knock is None:
+    if knock is None and is_ms43:
+        knock = values.get("E27")
+    elif knock is None:
         knock = values.get("E24")
     if knock is not None:
         knock_abs = abs(knock)

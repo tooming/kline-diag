@@ -88,5 +88,68 @@ class DetectPullTest(unittest.TestCase):
         self.assertEqual(transitions, [])
 
 
+class MS43ProfileDataTest(unittest.TestCase):
+    """MS43_PROFILES/EXPR_OVERRIDES_BY_DME are the second E39's (2003 520i,
+    M54B22/MS43) analogue of the original MS41/M52 tables -- these check the
+    data is internally consistent without needing the real car connected.
+    """
+
+    def test_every_ms43_profile_id_exists_in_ms43_params(self):
+        import json
+        with open(os.path.join(HERE, "ms43_ram_params.json")) as f:
+            ms43_ids = {p["id"] for p in json.load(f)}
+        for profile, channels in diag_ui.MS43_PROFILES.items():
+            for pid, label, group, graph in channels:
+                self.assertIn(pid, ms43_ids,
+                               f"{profile}: {pid} ({label}) not in ms43_ram_params.json")
+
+    def test_ms43_and_ms41_profile_tables_share_the_same_profile_names(self):
+        # _build_profile()/set_profile() pick a profile by name (e.g.
+        # "vanos") from whichever table PROFILES_BY_DME selects -- if the
+        # tables' key sets ever diverged, switching DME mid-session (or the
+        # UI's hardcoded profile dropdown, sourced from MS41_PROFILES.keys())
+        # could ask for a profile name the active table doesn't have.
+        self.assertEqual(set(diag_ui.MS41_PROFILES.keys()),
+                          set(diag_ui.MS43_PROFILES.keys()))
+
+    def test_ms41_expr_overrides_do_not_apply_under_ms43(self):
+        # S23 means "VANOS command" on MS41 but "DMTL evap pump" on MS43 --
+        # the MS41 bitmask override must never be picked up for an MS43 car.
+        self.assertNotIn("S23", diag_ui.EXPR_OVERRIDES_BY_DME.get("MS43", {}))
+        self.assertIn("S23", diag_ui.EXPR_OVERRIDES_BY_DME["MS41"])
+
+
+class EvaluateHealthMS43Test(unittest.TestCase):
+    """evaluate_health() must not apply MS41/M52-tuned thresholds (idle MAF
+    band, single-cam VANOS rest position, E24=knock-retard) to a sample that
+    carries MS43/M54 ids, since those ids mean different things on MS43
+    (E24 is RON fuel quality there, not knock retard) or don't apply at all
+    (M52's VANOS rest-angle heuristic doesn't fit M54's dual cams)."""
+
+    def test_ms43_sample_skips_m52_idle_maf_verdict(self):
+        # 18 kg/h would be a "green, idle airflow OK" verdict under the M52
+        # 15-22 kg/h band -- must come back as uncolored/informational once
+        # an MS43-only id (E12) marks this as an M54 sample instead.
+        health = diag_ui.evaluate_health({"P8": 800, "P12": 18.0, "E12": 65.0})
+        self.assertEqual(health["maf"]["color"], "blue")
+
+    def test_ms43_vanos_uses_active_ready_switches_not_m52_rest_heuristic(self):
+        health = diag_ui.evaluate_health(
+            {"E11": 61.0, "E12": -61.0, "S42": True, "S43": False, "P2": 90})
+        self.assertEqual(health["vanos"]["color"], "green")
+        self.assertIn("VANOS active", health["vanos"]["text"])
+        self.assertIn("ex ", health["vanos"]["value"])
+
+    def test_ms43_knock_reads_e27_not_e24(self):
+        # E24 on an MS43 sample is "RON Fuel Quality" (a %, commonly a large
+        # number) -- if it leaked into the knock-retard check via the MS41
+        # E217-then-E24 fallback, a normal fuel-quality reading could get
+        # misreported as heavy knock.
+        health = diag_ui.evaluate_health(
+            {"E12": 0.0, "E24": 87.0, "E27": 0.5})
+        self.assertEqual(health["timing"]["color"], "green")
+        self.assertIn("0.5", health["timing"]["value"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

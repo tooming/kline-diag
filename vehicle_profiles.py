@@ -19,21 +19,38 @@ Pure stdlib, offline, no car needed to load or test.
 PROFILES = {
     "e39": {
         "chassis": "E39",
-        "name": "1998 523i (M52)",
+        # Two real E39s share this DS2 code path with different DMEs --
+        # a 1998 523i (M52/MS41, manual, no EGS on the bus) and a 2003
+        # 520i (M54B22/MS43, automatic, EGS present). detect() reads the
+        # DME's own ident (dme_registry.py) at connect time so the right
+        # RAM param map and live-data profile load per car -- see
+        # diag_ui.py's PROFILES_BY_DME. Don't hardcode a single model/
+        # engine/gearbox here as if only one exists (this entry used to,
+        # and it was wrong for the second car -- e.g. don't assume "no
+        # EGS": it's model/gearbox dependent, not chassis-wide).
+        "name": "E39 (M52/MS41 or M54/MS43, detected live)",
         "protocol": "ds2",
         "baud": 9600,
         "parity": "E",
         "vin_source": {"module": 0x80, "job": "C_FG_LESEN"},
         "voltage": {"kind": "ds2_status", "addr": 0x12,
                     "job": "0B 03", "byte": 16, "scale": 0.1},
+        # Mirrors ds2_diag.E39_MODULES (the map E39Adapter.scan() actually
+        # uses) -- kept in sync rather than a stale subset.
         "modules": {
-            0x00: "GM/ZKE (body)", 0x12: "DME (engine)",
-            0x44: "EWS (immobiliser)", 0x56: "ABS/DSC",
-            0x5B: "IHKA (climate)", 0x60: "PDC",
-            0x68: "Radio", 0x80: "IKE (cluster)",
+            0x00: "GM/ZKE (general body module)",
+            0x08: "SZM (switch center, console)",
+            0x12: "DME (engine)", 0x18: "CDC (CD changer)",
+            0x32: "EGS (transmission)", 0x44: "EWS (immobiliser)",
+            0x50: "MFL (wheel controls)", 0x56: "ABS/ASC/DSC",
+            0x5B: "IHKA (climate)", 0x60: "PDC (park distance)",
+            0x68: "RADIO", 0x6A: "DSP (audio)",
+            0x80: "IKE (instrument cluster)", 0xA4: "MRS (airbag)",
+            0xC0: "MID (multi-info display)", 0xC8: "TEL (telephone)",
             0xD0: "LCM (lights)", 0xE8: "FBZV (remote)",
         },
-        "notes": "Manual gearbox — no EGS on the bus. MS41.0 firmware.",
+        "notes": "Engine/DME/gearbox vary by car — see comment above; "
+                 "detect() resolves the specifics live, don't assume.",
     },
     "e87": {
         "chassis": "E87",
