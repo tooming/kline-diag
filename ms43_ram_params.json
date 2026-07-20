@@ -1,992 +1,1105 @@
 [
- {
-  "id": "P8",
-  "name": "Engine Speed",
-  "desc": "P8-(STATUS_MOTORDREHZAHL)",
-  "addr": "0x0000E0E4",
-  "storagetype": "uint16",
-  "units": "RPM",
-  "expr": "x"
- },
- {
-  "id": "P9",
-  "name": "Vehicle Speed",
-  "desc": "P9-(STATUS_GESCHWINDIGKEIT)",
-  "addr": "0x0004047F",
-  "storagetype": "uint8",
-  "units": "km/h",
-  "expr": "x"
- },
- {
-  "id": "P96",
-  "name": "Accelerator Position",
-  "desc": "P96",
-  "addr": "0x0000E34A",
-  "storagetype": "uint16",
-  "units": "\u00b0TPS",
-  "expr": "0.0018310547*x"
- },
- {
-  "id": "P13",
-  "name": "Throttle Position",
-  "desc": "P13",
-  "addr": "0x0000E14C",
-  "storagetype": "uint16",
-  "units": "\u00b0TPS",
-  "expr": "0.0073*x"
- },
- {
-  "id": "P12",
-  "name": "Mass Airflow",
-  "desc": "P12-Mass Airflow",
-  "addr": "0x0000E32E",
-  "storagetype": "uint16",
-  "units": "kg/h",
-  "expr": "x*0.25"
- },
- {
-  "id": "P18",
-  "name": "Mass Airflow Volts",
-  "desc": "P18-Mass Airflow Volts",
-  "addr": "0x00000006",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "P11",
-  "name": "Intake Air Temperature",
-  "desc": "P11-(STATUS_AN_LUFTTEMPERATUR)",
-  "addr": "0x00040432",
-  "storagetype": "uint8",
-  "units": "\u00b0C",
-  "expr": "x*0.747-48"
- },
- {
-  "id": "P2",
-  "name": "Coolant Temperature",
-  "desc": "P2-(STATUS_MOTORTEMPERATUR)",
-  "addr": "0x00040433",
-  "storagetype": "uint8",
-  "units": "\u00b0C",
-  "expr": "x*0.75-48"
- },
- {
-  "id": "P4",
-  "name": "Oil Temperature",
-  "desc": "P4-Oil Temperature",
-  "addr": "0x0004042F",
-  "storagetype": "uint8",
-  "units": "\u00b0C",
-  "expr": "x*0.79607843-48"
- },
- {
-  "id": "P10",
-  "name": "Ignition Angle - Cyl 1",
-  "desc": "P10-(STATUS_ZUENDWINKEL)",
-  "addr": "0x0000FBAB",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "-0.375*x+72"
- },
- {
-  "id": "P112",
-  "name": "Ignition Angle - Cyl 2",
-  "desc": "P112-(STATUS_ZUENDWINKEL)",
-  "addr": "0x0000FBAF",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "-0.375*x+72"
- },
- {
-  "id": "P113",
-  "name": "Ignition Angle - Cyl 3",
-  "desc": "P113-(STATUS_ZUENDWINKEL)",
-  "addr": "0x0000FBAD",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "-0.375*x+72"
- },
- {
-  "id": "P114",
-  "name": "Ignition Angle - Cyl 4",
-  "desc": "P114-(STATUS_ZUENDWINKEL)",
-  "addr": "0x0000FBB0",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "-0.375*x+72"
- },
- {
-  "id": "P115",
-  "name": "Ignition Angle - Cyl 5",
-  "desc": "P115-(STATUS_ZUENDWINKEL)",
-  "addr": "0x0000FBAC",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "-0.375*x+72"
- },
- {
-  "id": "P116",
-  "name": "Ignition Angle - Cyl 6",
-  "desc": "P116-(STATUS_ZUENDWINKEL)",
-  "addr": "0x0000FBAE",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "-0.375*x+72"
- },
- {
-  "id": "P99",
-  "name": "Fuel Injector Pulse Width",
-  "desc": "P99 - ov_ti_bank_1",
-  "addr": "0x00040DAA",
-  "storagetype": "uint16",
-  "units": "ms",
-  "expr": "0.0053333333*x"
- },
- {
-  "id": "E11",
-  "name": "VANOS Intake",
-  "desc": "E11-(STATUS_NW_POSITION) Variable Valve angle",
-  "addr": "0x00040972",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "x*0.3745+60"
- },
- {
-  "id": "E12",
-  "name": "VANOS Exhaust",
-  "desc": "E12-(STATUS_NW_POSITION) Variable Valve angle",
-  "addr": "0x00040AE0",
-  "storagetype": "uint8",
-  "units": "\u00b0 CRK",
-  "expr": "x*-0.3745-60"
- },
- {
-  "id": "P17",
-  "name": "Battery Voltage",
-  "desc": "P17-Battery Voltage",
-  "addr": "0x00000007",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.025"
- },
- {
-  "id": "E13",
-  "name": "Lambda Integrator - Bank 1",
-  "desc": "E13-(TI_LAM_1)",
-  "addr": "0x00040C72",
-  "storagetype": "uint16",
-  "units": "%",
-  "expr": "(0.0015258789*x)-50"
- },
- {
-  "id": "E14",
-  "name": "Lambda Integrator - Bank 2",
-  "desc": "E14-(TI_LAM_2)",
-  "addr": "0x00040DE0",
-  "storagetype": "uint16",
-  "units": "%",
-  "expr": "(0.0015258789*x)-50"
- },
- {
-  "id": "E2",
-  "name": "Engine Load",
-  "desc": "E2-(STATUS_LAST)",
-  "addr": "0x0000E330",
-  "storagetype": "uint16",
-  "units": "mg/stroke",
-  "expr": "x*0.0212"
- },
- {
-  "id": "E233",
-  "name": "Filtered Load",
-  "desc": "E233-OV_MAF_TI",
-  "addr": "0x0000E33A",
-  "storagetype": "uint16",
-  "units": "mg/stroke",
-  "expr": "x*0.0212"
- },
- {
-  "id": "E234",
-  "name": "Calculated MAP",
-  "desc": "E234-OV_MAP",
-  "addr": "0x00040FD6",
-  "storagetype": "uint16",
-  "units": "hPa",
-  "expr": "x*0.082921489"
- },
- {
-  "id": "E218",
-  "name": "Gear",
-  "desc": "E28-ov_gear",
-  "addr": "0x000401AC",
-  "storagetype": "uint8",
-  "units": "#",
-  "expr": "x"
- },
- {
-  "id": "E27",
-  "name": "Knock",
-  "desc": "E27-(Knock1_6)",
-  "addr": "0x0000FB6E",
-  "storagetype": "uint8",
-  "units": "\u00b0 Cor",
-  "expr": "(x-128)*0.375"
- },
- {
-  "id": "E127",
-  "name": "Knock Sensor 1 Volts",
-  "desc": "E127",
-  "addr": "0x00000017",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E128",
-  "name": "Knock Sensor 2 Volts",
-  "desc": "E128",
-  "addr": "0x00000018",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E21",
-  "name": "Lambda Multiplicative Adaptation - Bank 1",
-  "desc": "E21-(TI_AD_FAC_1 or LTFT 1)",
-  "addr": "0x00040C82",
-  "storagetype": "uint16",
-  "units": "%",
-  "expr": "(x-32768)*100/65536"
- },
- {
-  "id": "E22",
-  "name": "Lambda Multiplicative Adaptation - Bank 2",
-  "desc": "E22-(TI_AD_FAC_2 or LTFT 2)",
-  "addr": "0x00040DF0",
-  "storagetype": "uint16",
-  "units": "%",
-  "expr": "(x-32768)*100/65536"
- },
- {
-  "id": "E1229",
-  "name": "Front O2 - Bank 1 Volts",
-  "desc": "E129-STATUS_VLS_DOWN_1_BAS",
-  "addr": "0x00000001",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E1330",
-  "name": "Front O2 - Bank 2 Volts",
-  "desc": "E130-STATUS_VLS_DOWN_2_BAS",
-  "addr": "0x00000002",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E129",
-  "name": "Rear O2 - Bank 1 Volts",
-  "desc": "E129-STATUS_VLS_DOWN_1_BAS",
-  "addr": "0x00000019",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E130",
-  "name": "Rear O2 - Bank 2 Volts",
-  "desc": "E130-STATUS_VLS_DOWN_2_BAS",
-  "addr": "0x0000001A",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E131",
-  "name": "DTML Volts",
-  "desc": "E131-ov_v_dtml_input",
-  "addr": "0x0000E556",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E133",
-  "name": "SAF Volts",
-  "desc": "E133-ov_v_SAF_input",
-  "addr": "0x0000E530",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "BitWise(1023, x, 1)*0.00488"
- },
- {
-  "id": "E132",
-  "name": "Fuel Cap Volts",
-  "desc": "E132-ov_v_fuc_input",
-  "addr": "0x0000E558",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E24",
-  "name": "RON Fuel Quality",
-  "desc": "E24-FAC_RON_AD correction applied moving from RON 98 to RON 91",
-  "addr": "0x0000E304",
-  "storagetype": "uint16",
-  "units": "%",
-  "expr": "x*100/65536"
- },
- {
-  "id": "E19",
-  "name": "Lambda Additive Adaptation - Bank 1",
-  "desc": "E19-(TI_AD_ADD_1)",
-  "addr": "0x00040C7C",
-  "storagetype": "uint16",
-  "units": "ms",
-  "expr": "(x-32768)*.004"
- },
- {
-  "id": "E20",
-  "name": "Lambda Additive Adaptation - Bank 2",
-  "desc": "E20-(TI_AD_ADD_2)",
-  "addr": "0x00040DEA",
-  "storagetype": "uint16",
-  "units": "ms",
-  "expr": "(x-32768)*.004"
- },
- {
-  "id": "E99",
-  "name": "Knock Adaptation Table 1 Index**",
-  "desc": "E99-Knock Adaptation Table 1 Index Direct RAM Read used by Adaptation display tool",
-  "addr": "0x040221",
-  "storagetype": "uint8",
-  "units": "\u00b0 Cor",
-  "expr": "(x-128)*0.375"
- },
- {
-  "id": "P24",
-  "name": "Atmospheric Pressure",
-  "desc": "P24-Atmospheric pressure",
-  "addr": "0x000404C8",
-  "storagetype": "uint16",
-  "units": "inHg",
-  "expr": "x*0.002455432"
- },
- {
-  "id": "E100",
-  "name": "zVDC Air Intake Temperature Sensor",
-  "desc": "E100-Air Intake Temperature Sensor",
-  "addr": "0x0000E540",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E101",
-  "name": "zVDC STATUS_LS_VKAT_SIGNAL_1",
-  "desc": "E101-STATUS_LS_VKAT_SIGNAL_1",
-  "addr": "0x00000001",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E102",
-  "name": "zVDC STATUS_LS_VKAT_SIGNAL_2",
-  "desc": "E102-STATUS_LS_VKAT_SIGNAL_2",
-  "addr": "0x00000002",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E103",
-  "name": "zVDC Engine Coolant Temperature Sensor",
-  "desc": "E103-Engine Coolant Temperature Sensor",
-  "addr": "0x0000E544",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E105",
-  "name": "zVDC Oil Temperature Sensor Volts",
-  "desc": "E105-Oil Temperature Sensor Volts",
-  "addr": "0x0000E542",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E108",
-  "name": "zVDC Accelerator Pedal Request Volts",
-  "desc": "E108-Battery Voltage Sensor",
-  "addr": "0x00000008",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.025"
- },
- {
-  "id": "E109",
-  "name": "zVDC Accelerator Pedal Plausibility Volts",
-  "desc": "E109",
-  "addr": "0x00000009",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "P19",
-  "name": "zVDC Throttle Position Volts",
-  "desc": "P19-Throttle 1 Position Volts",
-  "addr": "0x0000000A",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "P110",
-  "name": "zVDC Throttle Plausibility Volts",
-  "desc": "P110-Throttle 2 Position Volts",
-  "addr": "0x0000000B",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*0.00488"
- },
- {
-  "id": "E440",
-  "name": "zz ov_teg",
-  "desc": "E440-ov_teg",
-  "addr": "0x0000E148",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x"
- },
- {
-  "id": "E441",
-  "name": "zVDC EGT Sensor Input - Bank 1",
-  "desc": "E441-ov_v_teg_up_mes_1_input",
-  "addr": "0x0000E546",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E442",
-  "name": "zVDC EGT Sensor Input - Bank 2",
-  "desc": "E442-ov_v_teg_up_mes_2_input",
-  "addr": "0x0000E548",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E443",
-  "name": "zVDC EGT Sensor Input - Bank 2 Rear",
-  "desc": "E443-ov_v_teg_down_mes_2_input",
-  "addr": "0x0000E54C",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E447",
-  "name": "zz ov_teg_down_mes_2",
-  "desc": "E447-ov_teg_down_mes_2",
-  "addr": "0x000405A8",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E448",
-  "name": "zz ov_teg_up_mes_1",
-  "desc": "E448-ov_teg_up_mes_1",
-  "addr": "0x000405AA",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E449",
-  "name": "zz ov_teg_up_mes_2",
-  "desc": "E449-ov_teg_up_mes_2",
-  "addr": "0x000405AC",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E450",
-  "name": "zz ov_v_teg_up_mes_1",
-  "desc": "E450-ov_v_teg_up_mes_1",
-  "addr": "0x000405CA",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E451",
-  "name": "zz ov_v_teg_up_mes_2",
-  "desc": "E451-ov_v_teg_up_mes_2",
-  "addr": "0x000405CC",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "E452",
-  "name": "zz ov_v_teg_down_mes_2",
-  "desc": "E452-ov_v_teg_down_mes_2",
-  "addr": "0x000405CE",
-  "storagetype": "uint16",
-  "units": "VDC",
-  "expr": "x*(5/1024)"
- },
- {
-  "id": "S0",
-  "name": "xSW - Air Conditioner Compressor",
-  "desc": "S0",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S1",
-  "name": "xSW - Air Conditioner",
-  "desc": "S1",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S2",
-  "name": "xSW - Cruise Control",
-  "desc": "S2",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S3",
-  "name": "xSW - Clutch",
-  "desc": "S3",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S4",
-  "name": "xSW - Brake Light",
-  "desc": "S4",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S5",
-  "name": "xSW - Brake Light Test",
-  "desc": "S5",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S6",
-  "name": "xSW - Full Load",
-  "desc": "S6-S_VL",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "BitWise(3,x,1)/3"
- },
- {
-  "id": "S7",
-  "name": "xSW - Part Load",
-  "desc": "S7-Part load",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "BitWise(2,x,1)/2"
- },
- {
-  "id": "S8",
-  "name": "xSW - Idle",
-  "desc": "S8-S_LL",
-  "addr": "0x00",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "BitWise(1,x,1)"
- },
- {
-  "id": "S9",
-  "name": "xSW - Lambda Control Bank 2",
-  "desc": "S9",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S10",
-  "name": "xSW - Lambda Control Bank 1",
-  "desc": "S10",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S11",
-  "name": "xSW - Overrun Fuel Cut",
-  "desc": "S11",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S12",
-  "name": "xSW - Trailing Throttle",
-  "desc": "S12",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S13",
-  "name": "xSW - Engine Start State",
-  "desc": "S13",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S14",
-  "name": "xSW - AT at Drive or Reverse",
-  "desc": "S14",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S15",
-  "name": "xSW - AT Torque Request",
-  "desc": "S15",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S16",
-  "name": "xSW - CAN Communication",
-  "desc": "S16",
-  "addr": "0x01",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S17",
-  "name": "xSW - Secondary Air Valve",
-  "desc": "S17",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S18",
-  "name": "xSW - Secondary Air Pump",
-  "desc": "S18",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S19",
-  "name": "xSW - Byte 2 Bit 5",
-  "desc": "S19",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S20",
-  "name": "Rear Defogger Switch",
-  "desc": "S20",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S22",
-  "name": "xSW - Exhaust Flap",
-  "desc": "S22",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S23",
-  "name": "xSW - DMTL Pump",
-  "desc": "S23",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S24",
-  "name": "xSW - Air Conditioner State",
-  "desc": "S24",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S25",
-  "name": "xSW - Fuel Pump Relay",
-  "desc": "S25",
-  "addr": "0x02",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S26",
-  "name": "xSW - Catalyst Heating",
-  "desc": "S26",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S27",
-  "name": "xSW - DMTL Solenoid Valve",
-  "desc": "S27",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S28",
-  "name": "xSW - EML Light",
-  "desc": "S28",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S29",
-  "name": "xSW - Check Engine Light",
-  "desc": "S29",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S30",
-  "name": "xSW - Evap Solenoid",
-  "desc": "S30",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S31",
-  "name": "xSW - DISA",
-  "desc": "S31",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S32",
-  "name": "xSW - ASC/DSC Torque Intervention",
-  "desc": "S32",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S33",
-  "name": "xSW - Overheating Light",
-  "desc": "S33",
-  "addr": "0x03",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S34",
-  "name": "xSW - Byte 4 Bit 7",
-  "desc": "S34",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S35",
-  "name": "xSW - Byte 4 Bit 6",
-  "desc": "S35",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S36",
-  "name": "xSW - Byte 4 Bit 5",
-  "desc": "S36",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S37",
-  "name": "xSW - Byte 4 Bit 4",
-  "desc": "S37",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S38",
-  "name": "xSW - Byte 4 Bit 3",
-  "desc": "S38",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S39",
-  "name": "xSW - Byte 4 Bit 2",
-  "desc": "S39",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S40",
-  "name": "xSW - Byte 4 Bit 1",
-  "desc": "S40",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S41",
-  "name": "xSW - Byte 4 Bit 0",
-  "desc": "S41",
-  "addr": "0x04",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S42",
-  "name": "xSW - Vanos Active",
-  "desc": "S42",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S43",
-  "name": "xSW - Vanos Ready",
-  "desc": "S43",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S44",
-  "name": "xSW - Vanos Passive",
-  "desc": "S44",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S45",
-  "name": "xSW - Irregular Running Adaptation",
-  "desc": "S45",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S46",
-  "name": "xSW - Downstream Lambda Sensor Heater - Bank 2",
-  "desc": "S46",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S47",
-  "name": "xSW - Downstream Lambda Sensor Heater - Bank 1",
-  "desc": "S47",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S48",
-  "name": "xSW - Upstream Lambda Sensor Heater - Bank 2",
-  "desc": "S48",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- },
- {
-  "id": "S49",
-  "name": "xSW - Upstream Lambda Sensor Heater - Bank 1",
-  "desc": "S49",
-  "addr": "0x05",
-  "storagetype": "uint8",
-  "units": "On/Off",
-  "expr": "x"
- }
+  {
+    "id": "P8",
+    "name": "Engine Speed",
+    "desc": "P8-(STATUS_MOTORDREHZAHL)",
+    "addr": "0x0000E0E4",
+    "storagetype": "uint16",
+    "units": "RPM",
+    "expr": "x"
+  },
+  {
+    "id": "P9",
+    "name": "Vehicle Speed",
+    "desc": "P9-(STATUS_GESCHWINDIGKEIT)",
+    "addr": "0x0004047F",
+    "storagetype": "uint8",
+    "units": "km/h",
+    "expr": "x",
+    "addr_by_fw": {
+      "7519308": "0x00040463",
+      "7545150": "0x00040463"
+    }
+  },
+  {
+    "id": "P96",
+    "name": "Accelerator Position",
+    "desc": "P96",
+    "addr": "0x0000E34A",
+    "storagetype": "uint16",
+    "units": "\u00b0TPS",
+    "expr": "0.0018310547*x",
+    "addr_by_fw": {
+      "7519308": "0x0000E348",
+      "7545150": "0x0000E348"
+    }
+  },
+  {
+    "id": "P13",
+    "name": "Throttle Position",
+    "desc": "P13",
+    "addr": "0x0000E14C",
+    "storagetype": "uint16",
+    "units": "\u00b0TPS",
+    "expr": "0.0073*x"
+  },
+  {
+    "id": "P12",
+    "name": "Mass Airflow",
+    "desc": "P12-Mass Airflow",
+    "addr": "0x0000E32E",
+    "storagetype": "uint16",
+    "units": "kg/h",
+    "expr": "x*0.25",
+    "addr_by_fw": {
+      "7519308": "0x0000E32C",
+      "7545150": "0x0000E32C"
+    }
+  },
+  {
+    "id": "P18",
+    "name": "Mass Airflow Volts",
+    "desc": "P18-Mass Airflow Volts",
+    "addr": "0x00000006",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "P11",
+    "name": "Intake Air Temperature",
+    "desc": "P11-(STATUS_AN_LUFTTEMPERATUR)",
+    "addr": "0x00040432",
+    "storagetype": "uint8",
+    "units": "\u00b0C",
+    "expr": "x*0.747-48",
+    "addr_by_fw": {
+      "7519308": "0x00040422",
+      "7545150": "0x00040422"
+    }
+  },
+  {
+    "id": "P2",
+    "name": "Coolant Temperature",
+    "desc": "P2-(STATUS_MOTORTEMPERATUR)",
+    "addr": "0x00040433",
+    "storagetype": "uint8",
+    "units": "\u00b0C",
+    "expr": "x*0.75-48",
+    "addr_by_fw": {
+      "7519308": "0x00040423",
+      "7545150": "0x00040423"
+    }
+  },
+  {
+    "id": "P4",
+    "name": "Oil Temperature",
+    "desc": "P4-Oil Temperature",
+    "addr": "0x0004042F",
+    "storagetype": "uint8",
+    "units": "\u00b0C",
+    "expr": "x*0.79607843-48",
+    "addr_by_fw": {
+      "7519308": "0x0004041F",
+      "7545150": "0x0004041F"
+    }
+  },
+  {
+    "id": "P10",
+    "name": "Ignition Angle - Cyl 1",
+    "desc": "P10-(STATUS_ZUENDWINKEL)",
+    "addr": "0x0000FBAB",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "-0.375*x+72"
+  },
+  {
+    "id": "P112",
+    "name": "Ignition Angle - Cyl 2",
+    "desc": "P112-(STATUS_ZUENDWINKEL)",
+    "addr": "0x0000FBAF",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "-0.375*x+72"
+  },
+  {
+    "id": "P113",
+    "name": "Ignition Angle - Cyl 3",
+    "desc": "P113-(STATUS_ZUENDWINKEL)",
+    "addr": "0x0000FBAD",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "-0.375*x+72"
+  },
+  {
+    "id": "P114",
+    "name": "Ignition Angle - Cyl 4",
+    "desc": "P114-(STATUS_ZUENDWINKEL)",
+    "addr": "0x0000FBB0",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "-0.375*x+72"
+  },
+  {
+    "id": "P115",
+    "name": "Ignition Angle - Cyl 5",
+    "desc": "P115-(STATUS_ZUENDWINKEL)",
+    "addr": "0x0000FBAC",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "-0.375*x+72"
+  },
+  {
+    "id": "P116",
+    "name": "Ignition Angle - Cyl 6",
+    "desc": "P116-(STATUS_ZUENDWINKEL)",
+    "addr": "0x0000FBAE",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "-0.375*x+72"
+  },
+  {
+    "id": "P99",
+    "name": "Fuel Injector Pulse Width",
+    "desc": "P99 - ov_ti_bank_1",
+    "addr": "0x00040DAA",
+    "storagetype": "uint16",
+    "units": "ms",
+    "expr": "0.0053333333*x",
+    "addr_by_fw": {
+      "7519308": "0x00040D72",
+      "7545150": "0x00040D72"
+    }
+  },
+  {
+    "id": "E11",
+    "name": "VANOS Intake",
+    "desc": "E11-(STATUS_NW_POSITION) Variable Valve angle",
+    "addr": "0x00040972",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "x*0.3745+60",
+    "addr_by_fw": {
+      "7519308": "0x00040940",
+      "7545150": "0x00040940"
+    }
+  },
+  {
+    "id": "E12",
+    "name": "VANOS Exhaust",
+    "desc": "E12-(STATUS_NW_POSITION) Variable Valve angle",
+    "addr": "0x00040AE0",
+    "storagetype": "uint8",
+    "units": "\u00b0 CRK",
+    "expr": "x*-0.3745-60",
+    "addr_by_fw": {
+      "7519308": "0x00040AEE",
+      "7545150": "0x00040AEE"
+    }
+  },
+  {
+    "id": "P17",
+    "name": "Battery Voltage",
+    "desc": "P17-Battery Voltage",
+    "addr": "0x00000007",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.025"
+  },
+  {
+    "id": "E13",
+    "name": "Lambda Integrator - Bank 1",
+    "desc": "E13-(TI_LAM_1)",
+    "addr": "0x00040C72",
+    "storagetype": "uint16",
+    "units": "%",
+    "expr": "(0.0015258789*x)-50",
+    "addr_by_fw": {
+      "7519308": "0x00040C4E",
+      "7545150": "0x00040C4E"
+    }
+  },
+  {
+    "id": "E14",
+    "name": "Lambda Integrator - Bank 2",
+    "desc": "E14-(TI_LAM_2)",
+    "addr": "0x00040DE0",
+    "storagetype": "uint16",
+    "units": "%",
+    "expr": "(0.0015258789*x)-50",
+    "addr_by_fw": {
+      "7519308": "0x00040D9E",
+      "7545150": "0x00040D9E"
+    }
+  },
+  {
+    "id": "E2",
+    "name": "Engine Load",
+    "desc": "E2-(STATUS_LAST)",
+    "addr": "0x0000E330",
+    "storagetype": "uint16",
+    "units": "mg/stroke",
+    "expr": "x*0.0212",
+    "addr_by_fw": {
+      "7519308": "0x0000E32E",
+      "7545150": "0x0000E32E"
+    }
+  },
+  {
+    "id": "E233",
+    "name": "Filtered Load",
+    "desc": "E233-OV_MAF_TI",
+    "addr": "0x0000E33A",
+    "storagetype": "uint16",
+    "units": "mg/stroke",
+    "expr": "x*0.0212",
+    "addr_by_fw": {
+      "7519308": "0x0000E338",
+      "7545150": "0x0000E338"
+    }
+  },
+  {
+    "id": "E234",
+    "name": "Calculated MAP",
+    "desc": "E234-OV_MAP",
+    "addr": "0x00040FD6",
+    "storagetype": "uint16",
+    "units": "hPa",
+    "expr": "x*0.082921489",
+    "addr_by_fw": {
+      "7519308": "0x00040F64",
+      "7545150": "0x00040F64"
+    }
+  },
+  {
+    "id": "E218",
+    "name": "Gear",
+    "desc": "E28-ov_gear",
+    "addr": "0x000401AC",
+    "storagetype": "uint8",
+    "units": "#",
+    "expr": "x",
+    "addr_by_fw": {
+      "7519308": "0x000401A7",
+      "7545150": "0x000401A7"
+    }
+  },
+  {
+    "id": "E27",
+    "name": "Knock",
+    "desc": "E27-(Knock1_6)",
+    "addr": "0x0000FB6E",
+    "storagetype": "uint8",
+    "units": "\u00b0 Cor",
+    "expr": "(x-128)*0.375"
+  },
+  {
+    "id": "E127",
+    "name": "Knock Sensor 1 Volts",
+    "desc": "E127",
+    "addr": "0x00000017",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E128",
+    "name": "Knock Sensor 2 Volts",
+    "desc": "E128",
+    "addr": "0x00000018",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E21",
+    "name": "Lambda Multiplicative Adaptation - Bank 1",
+    "desc": "E21-(TI_AD_FAC_1 or LTFT 1)",
+    "addr": "0x00040C82",
+    "storagetype": "uint16",
+    "units": "%",
+    "expr": "(x-32768)*100/65536",
+    "addr_by_fw": {
+      "7519308": "0x00040C50",
+      "7545150": "0x00040C50"
+    }
+  },
+  {
+    "id": "E22",
+    "name": "Lambda Multiplicative Adaptation - Bank 2",
+    "desc": "E22-(TI_AD_FAC_2 or LTFT 2)",
+    "addr": "0x00040DF0",
+    "storagetype": "uint16",
+    "units": "%",
+    "expr": "(x-32768)*100/65536",
+    "addr_by_fw": {
+      "7519308": "0x00040DAE",
+      "7545150": "0x00040DAE"
+    }
+  },
+  {
+    "id": "E1229",
+    "name": "Front O2 - Bank 1 Volts",
+    "desc": "E129-STATUS_VLS_DOWN_1_BAS",
+    "addr": "0x00000001",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E1330",
+    "name": "Front O2 - Bank 2 Volts",
+    "desc": "E130-STATUS_VLS_DOWN_2_BAS",
+    "addr": "0x00000002",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E129",
+    "name": "Rear O2 - Bank 1 Volts",
+    "desc": "E129-STATUS_VLS_DOWN_1_BAS",
+    "addr": "0x00000019",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E130",
+    "name": "Rear O2 - Bank 2 Volts",
+    "desc": "E130-STATUS_VLS_DOWN_2_BAS",
+    "addr": "0x0000001A",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E131",
+    "name": "DTML Volts",
+    "desc": "E131-ov_v_dtml_input",
+    "addr": "0x0000E556",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488",
+    "addr_by_fw": {
+      "7519308": "0x0000E54C",
+      "7545150": "0x0000E54C"
+    }
+  },
+  {
+    "id": "E133",
+    "name": "SAF Volts",
+    "desc": "E133-ov_v_SAF_input",
+    "addr": "0x0000E530",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "BitWise(1023, x, 1)*0.00488",
+    "addr_by_fw": {
+      "7519308": "0x0000E526",
+      "7545150": "0x0000E526"
+    }
+  },
+  {
+    "id": "E132",
+    "name": "Fuel Cap Volts",
+    "desc": "E132-ov_v_fuc_input",
+    "addr": "0x0000E558",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488",
+    "addr_by_fw": {
+      "7519308": "0x0000E54E",
+      "7545150": "0x0000E54E"
+    }
+  },
+  {
+    "id": "E24",
+    "name": "RON Fuel Quality",
+    "desc": "E24-FAC_RON_AD correction applied moving from RON 98 to RON 91",
+    "addr": "0x0000E304",
+    "storagetype": "uint16",
+    "units": "%",
+    "expr": "x*100/65536",
+    "addr_by_fw": {
+      "7519308": "0x0000E302",
+      "7545150": "0x0000E302"
+    }
+  },
+  {
+    "id": "E19",
+    "name": "Lambda Additive Adaptation - Bank 1",
+    "desc": "E19-(TI_AD_ADD_1)",
+    "addr": "0x00040C7C",
+    "storagetype": "uint16",
+    "units": "ms",
+    "expr": "(x-32768)*.004",
+    "addr_by_fw": {
+      "7519308": "0x00040C4A",
+      "7545150": "0x00040C4A"
+    }
+  },
+  {
+    "id": "E20",
+    "name": "Lambda Additive Adaptation - Bank 2",
+    "desc": "E20-(TI_AD_ADD_2)",
+    "addr": "0x00040DEA",
+    "storagetype": "uint16",
+    "units": "ms",
+    "expr": "(x-32768)*.004",
+    "addr_by_fw": {
+      "7519308": "0x00040DA8",
+      "7545150": "0x00040DA8"
+    }
+  },
+  {
+    "id": "E99",
+    "name": "Knock Adaptation Table 1 Index**",
+    "desc": "E99-Knock Adaptation Table 1 Index Direct RAM Read used by Adaptation display tool",
+    "addr": "0x040221",
+    "storagetype": "uint8",
+    "units": "\u00b0 Cor",
+    "expr": "(x-128)*0.375",
+    "addr_by_fw": {
+      "7511570": "0x00040218",
+      "7519308": "0x00040218",
+      "7545150": "0x00040218"
+    }
+  },
+  {
+    "id": "P24",
+    "name": "Atmospheric Pressure",
+    "desc": "P24-Atmospheric pressure",
+    "addr": "0x000404C8",
+    "storagetype": "uint16",
+    "units": "inHg",
+    "expr": "x*0.002455432",
+    "addr_by_fw": {
+      "7519308": "0x000404A6",
+      "7545150": "0x000404A6"
+    }
+  },
+  {
+    "id": "E100",
+    "name": "zVDC Air Intake Temperature Sensor",
+    "desc": "E100-Air Intake Temperature Sensor",
+    "addr": "0x0000E540",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488",
+    "addr_by_fw": {
+      "7519308": "0x0000E536",
+      "7545150": "0x0000E536"
+    }
+  },
+  {
+    "id": "E101",
+    "name": "zVDC STATUS_LS_VKAT_SIGNAL_1",
+    "desc": "E101-STATUS_LS_VKAT_SIGNAL_1",
+    "addr": "0x00000001",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E102",
+    "name": "zVDC STATUS_LS_VKAT_SIGNAL_2",
+    "desc": "E102-STATUS_LS_VKAT_SIGNAL_2",
+    "addr": "0x00000002",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E103",
+    "name": "zVDC Engine Coolant Temperature Sensor",
+    "desc": "E103-Engine Coolant Temperature Sensor",
+    "addr": "0x0000E544",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488",
+    "addr_by_fw": {
+      "7519308": "0x0000E53A",
+      "7545150": "0x0000E53A"
+    }
+  },
+  {
+    "id": "E105",
+    "name": "zVDC Oil Temperature Sensor Volts",
+    "desc": "E105-Oil Temperature Sensor Volts",
+    "addr": "0x0000E542",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488",
+    "addr_by_fw": {
+      "7519308": "0x0000E538",
+      "7545150": "0x0000E538"
+    }
+  },
+  {
+    "id": "E108",
+    "name": "zVDC Accelerator Pedal Request Volts",
+    "desc": "E108-Battery Voltage Sensor",
+    "addr": "0x00000008",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.025"
+  },
+  {
+    "id": "E109",
+    "name": "zVDC Accelerator Pedal Plausibility Volts",
+    "desc": "E109",
+    "addr": "0x00000009",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "P19",
+    "name": "zVDC Throttle Position Volts",
+    "desc": "P19-Throttle 1 Position Volts",
+    "addr": "0x0000000A",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "P110",
+    "name": "zVDC Throttle Plausibility Volts",
+    "desc": "P110-Throttle 2 Position Volts",
+    "addr": "0x0000000B",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*0.00488"
+  },
+  {
+    "id": "E440",
+    "name": "zz ov_teg",
+    "desc": "E440-ov_teg",
+    "addr": "0x0000E148",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x"
+  },
+  {
+    "id": "E441",
+    "name": "zVDC EGT Sensor Input - Bank 1",
+    "desc": "E441-ov_v_teg_up_mes_1_input",
+    "addr": "0x0000E546",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E442",
+    "name": "zVDC EGT Sensor Input - Bank 2",
+    "desc": "E442-ov_v_teg_up_mes_2_input",
+    "addr": "0x0000E548",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E443",
+    "name": "zVDC EGT Sensor Input - Bank 2 Rear",
+    "desc": "E443-ov_v_teg_down_mes_2_input",
+    "addr": "0x0000E54C",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E447",
+    "name": "zz ov_teg_down_mes_2",
+    "desc": "E447-ov_teg_down_mes_2",
+    "addr": "0x000405A8",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E448",
+    "name": "zz ov_teg_up_mes_1",
+    "desc": "E448-ov_teg_up_mes_1",
+    "addr": "0x000405AA",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E449",
+    "name": "zz ov_teg_up_mes_2",
+    "desc": "E449-ov_teg_up_mes_2",
+    "addr": "0x000405AC",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E450",
+    "name": "zz ov_v_teg_up_mes_1",
+    "desc": "E450-ov_v_teg_up_mes_1",
+    "addr": "0x000405CA",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E451",
+    "name": "zz ov_v_teg_up_mes_2",
+    "desc": "E451-ov_v_teg_up_mes_2",
+    "addr": "0x000405CC",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "E452",
+    "name": "zz ov_v_teg_down_mes_2",
+    "desc": "E452-ov_v_teg_down_mes_2",
+    "addr": "0x000405CE",
+    "storagetype": "uint16",
+    "units": "VDC",
+    "expr": "x*(5/1024)"
+  },
+  {
+    "id": "S0",
+    "name": "xSW - Air Conditioner Compressor",
+    "desc": "S0",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S1",
+    "name": "xSW - Air Conditioner",
+    "desc": "S1",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S2",
+    "name": "xSW - Cruise Control",
+    "desc": "S2",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S3",
+    "name": "xSW - Clutch",
+    "desc": "S3",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S4",
+    "name": "xSW - Brake Light",
+    "desc": "S4",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S5",
+    "name": "xSW - Brake Light Test",
+    "desc": "S5",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S6",
+    "name": "xSW - Full Load",
+    "desc": "S6-S_VL",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "BitWise(3,x,1)/3"
+  },
+  {
+    "id": "S7",
+    "name": "xSW - Part Load",
+    "desc": "S7-Part load",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "BitWise(2,x,1)/2"
+  },
+  {
+    "id": "S8",
+    "name": "xSW - Idle",
+    "desc": "S8-S_LL",
+    "addr": "0x00",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "BitWise(1,x,1)"
+  },
+  {
+    "id": "S9",
+    "name": "xSW - Lambda Control Bank 2",
+    "desc": "S9",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S10",
+    "name": "xSW - Lambda Control Bank 1",
+    "desc": "S10",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S11",
+    "name": "xSW - Overrun Fuel Cut",
+    "desc": "S11",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S12",
+    "name": "xSW - Trailing Throttle",
+    "desc": "S12",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S13",
+    "name": "xSW - Engine Start State",
+    "desc": "S13",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S14",
+    "name": "xSW - AT at Drive or Reverse",
+    "desc": "S14",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S15",
+    "name": "xSW - AT Torque Request",
+    "desc": "S15",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S16",
+    "name": "xSW - CAN Communication",
+    "desc": "S16",
+    "addr": "0x01",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S17",
+    "name": "xSW - Secondary Air Valve",
+    "desc": "S17",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S18",
+    "name": "xSW - Secondary Air Pump",
+    "desc": "S18",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S19",
+    "name": "xSW - Byte 2 Bit 5",
+    "desc": "S19",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S20",
+    "name": "Rear Defogger Switch",
+    "desc": "S20",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S22",
+    "name": "xSW - Exhaust Flap",
+    "desc": "S22",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S23",
+    "name": "xSW - DMTL Pump",
+    "desc": "S23",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S24",
+    "name": "xSW - Air Conditioner State",
+    "desc": "S24",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S25",
+    "name": "xSW - Fuel Pump Relay",
+    "desc": "S25",
+    "addr": "0x02",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S26",
+    "name": "xSW - Catalyst Heating",
+    "desc": "S26",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S27",
+    "name": "xSW - DMTL Solenoid Valve",
+    "desc": "S27",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S28",
+    "name": "xSW - EML Light",
+    "desc": "S28",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S29",
+    "name": "xSW - Check Engine Light",
+    "desc": "S29",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S30",
+    "name": "xSW - Evap Solenoid",
+    "desc": "S30",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S31",
+    "name": "xSW - DISA",
+    "desc": "S31",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S32",
+    "name": "xSW - ASC/DSC Torque Intervention",
+    "desc": "S32",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S33",
+    "name": "xSW - Overheating Light",
+    "desc": "S33",
+    "addr": "0x03",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S34",
+    "name": "xSW - Byte 4 Bit 7",
+    "desc": "S34",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S35",
+    "name": "xSW - Byte 4 Bit 6",
+    "desc": "S35",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S36",
+    "name": "xSW - Byte 4 Bit 5",
+    "desc": "S36",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S37",
+    "name": "xSW - Byte 4 Bit 4",
+    "desc": "S37",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S38",
+    "name": "xSW - Byte 4 Bit 3",
+    "desc": "S38",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S39",
+    "name": "xSW - Byte 4 Bit 2",
+    "desc": "S39",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S40",
+    "name": "xSW - Byte 4 Bit 1",
+    "desc": "S40",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S41",
+    "name": "xSW - Byte 4 Bit 0",
+    "desc": "S41",
+    "addr": "0x04",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S42",
+    "name": "xSW - Vanos Active",
+    "desc": "S42",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S43",
+    "name": "xSW - Vanos Ready",
+    "desc": "S43",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S44",
+    "name": "xSW - Vanos Passive",
+    "desc": "S44",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S45",
+    "name": "xSW - Irregular Running Adaptation",
+    "desc": "S45",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S46",
+    "name": "xSW - Downstream Lambda Sensor Heater - Bank 2",
+    "desc": "S46",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S47",
+    "name": "xSW - Downstream Lambda Sensor Heater - Bank 1",
+    "desc": "S47",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S48",
+    "name": "xSW - Upstream Lambda Sensor Heater - Bank 2",
+    "desc": "S48",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  },
+  {
+    "id": "S49",
+    "name": "xSW - Upstream Lambda Sensor Heater - Bank 1",
+    "desc": "S49",
+    "addr": "0x05",
+    "storagetype": "uint8",
+    "units": "On/Off",
+    "expr": "x"
+  }
 ]

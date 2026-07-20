@@ -1,3 +1,6 @@
 [submodule "sgbd_full"]
 	path = sgbd_full
 	url = https://github.com/emdzej/ediabasx-docs-sgbd.git
+[submodule "romraider_ms43"]
+	path = romraider_ms43
+	url = https://github.com/ba114/Siemens-MS43.git

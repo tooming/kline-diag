@@ -3,15 +3,23 @@
 
 The family runs several E39s with different engines. They all speak DS2 at
 0x12. The custom RAM address-list live-logging mechanism (0B 01 arm / 0B 00
-read) works reliably on MS41 (car-verified) but does NOT reliably on MS43 --
-tested live on a real MS43 car (part 7519308) and found to return garbage
-for most non-ADC channels (fuel trims pinned at raw-value extremes, -43C
-coolant, 1300 kg/h MAF, gear "24"). ms43_ram_params.json/this file's MS43
-entry are kept for the RAM explorer (manual address probing) but the live
-dashboard no longer uses them -- see diag_ui.py's E39Adapter._load_dme_params
-and ds2_diag.MS43StatusLogger, which read MS43's own FIXED status-group
-jobs (0B 03 engine params / 0B 04 digital IO) instead, reconstructed from
-the factory EDIABAS SGBD MS430DS0.prg (reference_ms43_ds2_commands.ts).
+read) works reliably on MS41 (car-verified) and, it turns out, on MS43 too
+-- the "found unreliable" conclusion from an earlier session's live test on
+part 7519308 (fuel trims pinned at raw-value extremes, -43C coolant, 1300
+kg/h MAF, gear "24") was a wrong-firmware-variant bug, not a protocol
+limitation: ms43_ram_params.json's addresses were byte-for-byte identical
+to part 7551615's RAM layout, and part 7519308 uses a *different* base
+address for most RAM params (confirmed against romraider_ms43's per-part
+`<ecu id="...">` variants -- see git log for the fix, load_params()'s
+addr_by_fw resolves it now same as MS41.0 vs MS41.1). The live dashboard
+still defaults to ds2_diag.MS43StatusLogger's SGBD-sourced FIXED status-
+group reads (0B 03 / 0B 04, reconstructed from the factory EDIABAS SGBD
+MS430DS0.prg, see reference_ms43_ds2_commands.ts) since that's simpler and
+needs no per-part-number address table -- this RAM map now serves as a
+correctly-addressed option for channels the fixed blocks don't cover
+(E19-E22 real adaptation, E24 RON quality, E99, Gear, atmospheric
+pressure, Calculated MAP, front/rear O2 voltage) and the RAM explorer,
+not yet wired into the live profiles.
 
 Detection: the DS2 ident (service 0x00) response contains the ECU part
 number as the leading digits of its ASCII (e.g. the M52 here idents as
@@ -19,9 +27,10 @@ number as the leading digits of its ASCII (e.g. the M52 here idents as
 
 Coverage today:
   - MS41  (M52,    e.g. 523i/528i '96-'98)  -> ms41_ram_params.json  [car-verified]
-  - MS43  (M54,    e.g. 520i/525i/530i '00-'03) -> ms43_ram_params.json [RAM
-    address-list unreliable on real hardware; live dashboard uses the SGBD
-    fixed status-group reads instead, see above]
+  - MS43  (M54,    e.g. 520i/525i/530i '00-'03) -> ms43_ram_params.json [car-
+    verified addresses for parts 7519308/7545150/7511570 via addr_by_fw
+    (romraider_ms43 submodule); live dashboard still defaults to the SGBD
+    fixed status-group reads for simplicity, see above]
 MS42 (M52TU) and ME7.2 (M62 V8) are recognised but have no param map yet
 (they degrade to fault/live-block reads, which still work).
 
@@ -34,17 +43,18 @@ import paths
 HERE = paths.resource_dir()
 
 # part-number prefix -> DME descriptor. Prefixes are the leading digits of
-# the DS2 ident ASCII. Sources: RomRaider/ms4x.net ECU-id lists.
+# the DS2 ident ASCII. Sources: RomRaider/ms4x.net ECU-id lists (see the
+# romraider_ms43 submodule for MS43's, ba114/Siemens-MS43 on GitHub).
 DME_REGISTRY = [
     {"dme": "MS41", "engine": "M52", "params": "ms41_ram_params.json",
      "evidence": "car-verified",
      "part_numbers": ["1429861", "1405854", "1406464", "1429373",
                       "1432401", "1437806", "1440176", "1430656"]},
     {"dme": "MS43", "engine": "M54", "params": "ms43_ram_params.json",
-     "evidence": "RAM address-list map (RomRaider def) tested live on "
-                 "part 7519308 and found unreliable for most non-ADC "
-                 "channels -- live dashboard uses ds2_diag.MS43StatusLogger's "
-                 "SGBD-sourced fixed status-group reads instead, not this map",
+     "evidence": "car-verified addresses (addr_by_fw) for parts 7519308/"
+                 "7545150/7511570 -- cross-checked against romraider_ms43 "
+                 "and the primary SGBD doc; 7526753/7532493 still use the "
+                 "unverified default addr (no live-tested car yet)",
      "part_numbers": ["7511570", "7519308", "7545150", "7551615",
                       "7526753", "7532493"]},
     # Recognised, no param map yet (live block + faults still work):

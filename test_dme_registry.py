@@ -59,6 +59,25 @@ def test_ms43_has_real_vanos_position():
           f"(M52 E11@{ms41['E11']['addr']}, M54 E11@{ms43['E11']['addr']})")
 
 
+def test_ms43_part_7519308_resolves_to_its_own_addresses():
+    """The real bug behind the original "numbers don't make sense" MS43
+    report: ms43_ram_params.json's addresses were byte-for-byte identical
+    to part 7551615's RAM layout, but the actual car detected part
+    7519308, which uses different base addresses for most RAM params
+    (confirmed against the romraider_ms43 submodule's per-part variants).
+    addr_by_fw must resolve to the 7519308-specific address, same
+    mechanism as MS41.0 vs MS41.1."""
+    entry = [e for e in dme_registry.DME_REGISTRY if e["dme"] == "MS43"][0]
+    default_params = {p["id"]: p for p in dme_registry.load_params(entry)}
+    resolved = {p["id"]: p for p in
+                dme_registry.load_params(entry, part_number="7519308")}
+    assert default_params["P2"]["addr"] != resolved["P2"]["addr"], \
+        "7519308 should not fall back to the (wrong) default address"
+    assert resolved["P2"]["addr"] == "0x00040423", resolved["P2"]["addr"]
+    assert resolved["P2"].get("addr_resolved_for") == "7519308"
+    print("test_ms43_part_7519308_resolves_to_its_own_addresses OK")
+
+
 def test_supported_list():
     eng = dme_registry.all_engines()
     dmes = {e["dme"] for e in eng}
@@ -74,5 +93,6 @@ if __name__ == "__main__":
     test_unknown_part_number()
     test_param_maps_load_and_have_core_channels()
     test_ms43_has_real_vanos_position()
+    test_ms43_part_7519308_resolves_to_its_own_addresses()
     test_supported_list()
     print("\nAll DME registry tests passed.")
