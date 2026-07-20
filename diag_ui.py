@@ -169,20 +169,23 @@ MS41_PROFILES = {
     ],
 }
 
-# Live channel profiles for the MS43 (M54) DME -- a genuinely different chip
-# from MS41/M52 above: dual VANOS (separate intake E11 + exhaust E12 cam
-# adjusters, vs. M52's single cam), drive-by-wire throttle (P96 pedal vs
-# P13 throttle plate, no IACV), per-bank lambda trims/O2 sensors, per-
-# cylinder ignition timing (P10/P112-116), and an automatic-transmission
-# gear signal (E218). Most MS41 channel ids (P21 injector PW, E217 knock
-# retard, E9 IACV, E15/E16 O2 heaters, E204-209 per-cylinder knock, E210
-# VANOS raw, S23 as a VANOS command bit) simply don't exist under those ids
-# in ms43_ram_params.json -- reusing MS41_PROFILES against an MS43 car
-# silently drops most channels instead of erroring, so this needs its own
-# table, not a shared one. Sourced from ms43_ram_params.json (RomRaider def,
-# "not car-verified" per dme_registry.py) -- channel counts mirror MS41's
-# rough ~18-channel practical limit as a starting point, unconfirmed on
-# real MS43 hardware; trim if live streaming proves unreliable at this size.
+# Live channel profiles for the MS43 (M54) DME. Earlier version of this
+# table was built from ms43_ram_params.json's custom RAM address list (0B
+# 01 arm / 0B 00 read) -- proven wrong on a real car (part 7519308):
+# fuel trims pegged at their raw-value extremes, -43C coolant, 1300 kg/h
+# MAF, gear "24". Rebuilt entirely from ds2_diag.MS43_ENGINE_PARAMS /
+# MS43_DIGITAL_BITS instead -- BMW's own FIXED status-group reads (0B 03 /
+# 0B 04), reconstructed from the factory EDIABAS SGBD MS430DS0.prg (see
+# reference_ms43_ds2_commands.ts and ds2_diag.MS43StatusLogger). No arm
+# step, no custom address list, so no per-channel address to get wrong.
+# Every channel here has a verified offset in that source; nothing carried
+# over from the old unverified map (no Gear, RON fuel quality, per-
+# cylinder knock, rear O2 voltage, Calculated MAP -- none of those are in
+# the SGBD-documented blocks, so they're gone rather than guessed).
+# `MS43StatusLogger.sample()` always returns the full fixed block
+# regardless of which profile is active (it's two small fixed requests,
+# not a size-limited custom arm list) -- these profiles just group/filter
+# for display, they don't change what's read off the wire.
 MS43_PROFILES = {
     "driveability": [
         ("P8", "RPM", "Engine", True),
@@ -190,20 +193,15 @@ MS43_PROFILES = {
         ("P13", "Throttle", "Engine", True),
         ("E2", "Load", "Engine", True),
         ("P12", "MAF", "Airflow", True),
-        ("P18", "MAF Voltage", "Airflow", False),
         ("P99", "Injector PW", "Fuel", True),
         ("E13", "Lambda Trim Bank 1", "Fuel Trim", True),
         ("E14", "Lambda Trim Bank 2", "Fuel Trim", True),
-        ("E21", "Lambda Adapt Bank 1", "Fuel Trim", False),
-        ("E22", "Lambda Adapt Bank 2", "Fuel Trim", False),
-        ("P10", "Ignition Advance (Cyl 1)", "Ignition", True),
-        ("E27", "Knock", "Ignition", True),
+        ("P10", "Ignition Advance", "Ignition", True),
         ("E11", "VANOS Intake", "VANOS", True),
         ("E12", "VANOS Exhaust", "VANOS", True),
         ("P2", "Coolant Temp", "Temps", False),
         ("P11", "Intake Temp", "Temps", False),
         ("P17", "Battery", "Electrical", True),
-        ("E218", "Gear", "Transmission", False),
     ],
     "fuel": [
         ("P8", "RPM", "Engine", True),
@@ -213,46 +211,57 @@ MS43_PROFILES = {
         ("P99", "Injector PW", "Fuel", True),
         ("E13", "Lambda Trim Bank 1", "Fuel Trim", True),
         ("E14", "Lambda Trim Bank 2", "Fuel Trim", True),
-        ("E19", "Lambda Adapt (Additive) Bank 1", "Fuel Trim", False),
-        ("E20", "Lambda Adapt (Additive) Bank 2", "Fuel Trim", False),
-        ("E21", "Lambda Adapt Bank 1", "Fuel Trim", True),
-        ("E22", "Lambda Adapt Bank 2", "Fuel Trim", True),
-        ("E1229", "Front O2 Voltage Bank 1", "O2 Sensors", True),
-        ("E1330", "Front O2 Voltage Bank 2", "O2 Sensors", True),
-        ("E129", "Rear O2 Voltage Bank 1", "O2 Sensors", True),
-        ("E130", "Rear O2 Voltage Bank 2", "O2 Sensors", True),
-        ("E24", "RON Fuel Quality", "Fuel", False),
+        ("NL_2", "O2 Sensor Pre-Cat Bank 1", "O2 Sensors", True),
+        ("NL_5", "O2 Sensor Pre-Cat Bank 2", "O2 Sensors", True),
+        ("LSHPWM_UP_1", "O2 Heater Pre-Cat Bank 1", "O2 Sensors", False),
+        ("LSHPWM_UP_2", "O2 Heater Pre-Cat Bank 2", "O2 Sensors", False),
+        ("LSHPWM_DN_1", "O2 Heater Post-Cat Bank 1", "O2 Sensors", False),
+        ("LSHPWM_DN_2", "O2 Heater Post-Cat Bank 2", "O2 Sensors", False),
+        ("LAMBDAREG1", "Lambda Control Bank 1", "Fuel Trim", False),
+        ("LAMBDAREG2", "Lambda Control Bank 2", "Fuel Trim", False),
+        ("SCHUB_AB", "Fuel Cutoff (Overrun)", "Fuel", False),
     ],
-    "knock": [
-        ("P8", "RPM", "Engine", True),
-        ("E2", "Load", "Engine", True),
-        ("P13", "Throttle", "Engine", False),
-        ("P10", "Ignition Cyl 1", "Cylinders", True),
-        ("P112", "Ignition Cyl 2", "Cylinders", True),
-        ("P113", "Ignition Cyl 3", "Cylinders", True),
-        ("P114", "Ignition Cyl 4", "Cylinders", True),
-        ("P115", "Ignition Cyl 5", "Cylinders", True),
-        ("P116", "Ignition Cyl 6", "Cylinders", True),
-        ("E27", "Knock Retard", "Knock", True),
-        ("E127", "Knock Sensor 1 Voltage", "Knock", False),
-        ("E128", "Knock Sensor 2 Voltage", "Knock", False),
-        ("E99", "Knock Adaptation", "Knock", False),
+    "digital": [
+        ("P8", "RPM", "Engine", False),
+        ("LL", "Idle", "Load State", False),
+        ("TL", "Part Load", "Load State", False),
+        ("VL", "Full Load", "Load State", False),
+        ("START", "Cranking", "Engine State", False),
+        ("SCHUB", "Overrun Detected", "Engine State", False),
+        ("FS", "Fault Memory Active", "Engine State", False),
+        ("EGS", "EGS (Transmission) Comm", "Bus", False),
+        ("CAN", "CAN Bus Active", "Bus", False),
+        ("MIL", "MIL (Check Engine)", "Warnings", False),
+        ("TMOT", "Engine Temp Warning", "Warnings", False),
+        ("ASC", "ASC/DSC Active", "Chassis", False),
+        ("S_KO", "AC Compressor Relay", "AC", False),
+        ("S_AC", "AC Request", "AC", False),
+        ("S_FGR", "Cruise Control Active", "Cruise", False),
+        ("R_EKP", "Fuel Pump Relay", "Fuel", False),
+        ("KAT_H", "Catalyst Heater", "Fuel", False),
+        ("TEV", "Tank Vent Valve (EVAP)", "Fuel", False),
+        ("DMTL", "DMTL (Leak Detection)", "Fuel", False),
+        ("SLV", "Secondary Air Valve", "Fuel", False),
+        ("SLP", "Secondary Air Pump", "Fuel", False),
+        ("DISA", "DISA Valve (Intake)", "Engine", False),
     ],
     "sensors": [
         ("P8", "RPM", "Engine", False),
         ("P13", "Throttle", "Engine", False),
         ("P96", "Accelerator Position", "Engine", True),
-        ("P18", "MAF Voltage", "Voltages", True),
-        ("P19", "Throttle Voltage", "Voltages", True),
-        ("P17", "Battery Voltage", "Voltages", True),
-        ("E1229", "Front O2 Voltage Bank 1", "O2", True),
-        ("E1330", "Front O2 Voltage Bank 2", "O2", True),
-        ("P11", "IAT", "Temps", False),
-        ("P2", "ECT", "Temps", False),
+        ("P17", "Battery", "Electrical", True),
+        ("VB_IGK", "Battery (IGK)", "Electrical", False),
+        ("NL_2", "O2 Sensor Pre-Cat Bank 1", "O2", True),
+        ("NL_5", "O2 Sensor Pre-Cat Bank 2", "O2", True),
+        ("P11", "Intake Temp", "Temps", False),
+        ("P2", "Coolant Temp", "Temps", False),
+        ("TCO_EX", "Coolant Outlet Temp", "Temps", False),
         ("P4", "Oil Temp", "Temps", True),
         ("P12", "MAF", "Airflow", False),
         ("P24", "Atmospheric Pressure", "Ambient", False),
-        ("E234", "Calculated MAP", "Engine", False),
+        ("ECFPWM_ECF", "Electric Fan Duty", "Cooling", False),
+        ("ISAPWM_IS", "Idle Integrator", "Idle", False),
+        ("ISAPWM_ISA", "Idle Actuator", "Idle", False),
     ],
     "vanos": [
         ("P8", "RPM", "Engine", True),
@@ -262,21 +271,21 @@ MS43_PROFILES = {
         ("P12", "MAF", "Airflow", True),
         ("P99", "Injector PW", "Fuel", True),
         ("P10", "Ignition Advance", "Timing", True),
-        ("E27", "Knock", "Timing", True),
         ("E11", "VANOS Intake", "VANOS", True),
         ("E12", "VANOS Exhaust", "VANOS", True),
-        ("S42", "VANOS Active", "VANOS", False),
-        ("S43", "VANOS Ready", "VANOS", False),
-        ("S44", "VANOS Passive", "VANOS", False),
+        ("VAN_AK", "VANOS Active", "VANOS", False),
+        ("VAN_BR", "VANOS Ready", "VANOS", False),
+        ("VAN_PA", "VANOS Parked", "VANOS", False),
+        ("GEB_OK", "Crankshaft Signal OK", "VANOS", False),
         ("P2", "Coolant Temp", "Temps", True),
         ("P11", "Intake Temp", "Temps", False),
     ],
 }
 
-# Which profile table + expression overrides apply to a detected DME.
-# Falls back to MS41 for anything without its own entry (MS42/ME7.2 have no
-# param map at all per dme_registry.py, so this choice is moot for them --
-# _load_dme_params() already degrades to the MS41 id set in that case).
+# Which profile table applies to a detected DME. Falls back to MS41 for
+# anything without its own entry (MS42/ME7.2 have no param map at all per
+# dme_registry.py, so this choice is moot for them -- _load_dme_params()
+# already degrades to the MS41 id set in that case).
 PROFILES_BY_DME = {"MS41": MS41_PROFILES, "MS43": MS43_PROFILES}
 
 # The RomRaider expressions for switch params use BitWise()/! which our
@@ -382,6 +391,15 @@ class E39Adapter:
         self._build_profile(profile)
 
     def _load_dme_params(self, descriptor):
+        if descriptor.get("dme") == "MS43":
+            # BMW's own fixed status-group reads (ds2_diag.MS43StatusLogger)
+            # -- no RAM address-list param map to load, just the verified
+            # SGBD-sourced field tables keyed by id like everything else.
+            self._all_params = {
+                **{p["id"]: p for p in ds2_diag.MS43_ENGINE_PARAMS},
+                **{b["id"]: b for b in ds2_diag.MS43_DIGITAL_BITS},
+            }
+            return
         import dme_registry
         plist = dme_registry.load_params(
             descriptor, part_number=descriptor.get("matched_part"))
@@ -396,53 +414,77 @@ class E39Adapter:
     def _build_profile(self, profile):
         """Build live_channels and logger from the given profile name.
 
-        Which channel table and expression overrides apply depends on the
-        detected DME (self.dme, set by detect()) -- MS41/MS43 use different
-        param ids for the same concepts and MS43 reassigns some MS41 ids to
-        unrelated switches (see PROFILES_BY_DME/EXPR_OVERRIDES_BY_DME)."""
+        Which channel table applies depends on the detected DME (self.dme,
+        set by detect()) -- MS41/MS43 use different ids for the same
+        concepts (see PROFILES_BY_DME). MS43 additionally uses a completely
+        different *logger* (ds2_diag.MS43StatusLogger's fixed BMW status-
+        group reads, not MS41Logger's custom RAM address list) since that
+        address-list mechanism proved unreliable for MS43 on real hardware
+        -- see MS43_PROFILES' comment."""
         profile_table = PROFILES_BY_DME.get(self.dme.get("dme"), MS41_PROFILES)
-        overrides = EXPR_OVERRIDES_BY_DME.get(self.dme.get("dme"), {})
         if profile not in profile_table:
             profile = "driveability"
         self.current_profile = profile
         self.live_channels = []
         params = []
-        adc_count = 0
-        for pid, label, group, graph in profile_table[profile]:
-            if pid not in self._all_params:
-                continue
-            p = self._all_params[pid]
-            if pid in overrides:
-                p = dict(p)
-                p["expr"], p["units"] = overrides[pid]
-            # Count ADC reads (addresses < 0x1C use ADC procedure type)
-            if int(p["addr"], 16) < 0x1C:
-                adc_count += 1
-            self.live_channels.append(
-                {"id": pid, "label": label, "group": group,
-                 "unit": p["units"], "graph": graph})
-            params.append(p)
+
+        if self.dme.get("dme") == "MS43":
+            for pid, label, group, graph in profile_table[profile]:
+                p = self._all_params.get(pid)
+                if p is None:
+                    continue
+                self.live_channels.append(
+                    {"id": pid, "label": label, "group": group,
+                     "unit": p.get("units", ""), "graph": graph})
+                params.append(p)
+            self.logger = ds2_diag.MS43StatusLogger(self.ds2)
+            # No ADC-procedure concept in this fixed status-group mechanism
+            # (unlike MS41Logger's arm list) -- 0/N just means "none of
+            # these are ADC reads", not that anything's missing.
+            self.profile_stats = {"total": len(params), "adc": 0,
+                                   "ram": len(params)}
+        else:
+            overrides = EXPR_OVERRIDES_BY_DME.get(self.dme.get("dme"), {})
+            adc_count = 0
+            for pid, label, group, graph in profile_table[profile]:
+                if pid not in self._all_params:
+                    continue
+                p = self._all_params[pid]
+                if pid in overrides:
+                    p = dict(p)
+                    p["expr"], p["units"] = overrides[pid]
+                # Count ADC reads (addresses < 0x1C use ADC procedure type)
+                if int(p["addr"], 16) < 0x1C:
+                    adc_count += 1
+                self.live_channels.append(
+                    {"id": pid, "label": label, "group": group,
+                     "unit": p["units"], "graph": graph})
+                params.append(p)
+            self.logger = ds2_diag.MS41Logger(self.ds2, params)
+            self.profile_stats = {
+                "total": len(params),
+                "adc": adc_count,
+                "ram": len(params) - adc_count
+            }
+
         if any(p["id"] == "S23" for p in params):
             # synthetic channel computed by VanosMonitor from S23 + E11
+            # (MS41 only -- MS43 already reports VAN_AK/VAN_BR/VAN_PA
+            # directly, no need to synthesize a state string for it).
             self.live_channels.append(
                 {"id": "vanos_state", "label": "VANOS State",
                  "group": "VANOS", "unit": "", "graph": False})
         if any(p["id"] == "P12" for p in params) and any(p["id"] == "P8" for p in params):
             # synthetic channels computed by live_sample() from P12 (MAF)
             # + P8 (RPM) via estimate_power_torque(), same physics-based
-            # estimate as the E87.
+            # estimate as the E87. Both ids are reused as-is for MS43 (see
+            # MS43_ENGINE_PARAMS) specifically so this keeps working there.
             self.live_channels.append(
                 {"id": "power_kw", "label": "Est. Crank Power", "unit": "kW",
                  "group": "Engine", "graph": True})
             self.live_channels.append(
                 {"id": "torque_nm", "label": "Est. Crank Torque", "unit": "Nm",
                  "group": "Engine", "graph": True})
-        self.logger = ds2_diag.MS41Logger(self.ds2, params)
-        self.profile_stats = {
-            "total": len(params),
-            "adc": adc_count,
-            "ram": len(params) - adc_count
-        }
 
     def set_profile(self, profile_name):
         """Switch to a different logging profile and re-arm the logger."""
@@ -1448,8 +1490,12 @@ def evaluate_health(values):
     # A sample carrying MS43-only ids (dual-cam VANOS Exhaust, or any of its
     # VANOS state switches) identifies an M54 car -- evaluate_health() gets
     # no explicit DME/engine argument, so this is the same values-derived
-    # signal already used above to tell E39/E87 samples apart.
-    is_ms43 = "E12" in values or any(k in values for k in ("S42", "S43", "S44"))
+    # signal already used above to tell E39/E87 samples apart. Ids match
+    # ds2_diag.MS43_ENGINE_PARAMS/MS43_DIGITAL_BITS (BMW's own fixed
+    # status-group reads -- see MS43_PROFILES' comment for why this
+    # replaced the earlier RAM-address-list-derived channel set).
+    is_ms43 = "E12" in values or any(
+        k in values for k in ("VAN_AK", "VAN_BR", "VAN_PA"))
 
     # MAF health (P12)
     maf = values.get("P12")
@@ -1485,8 +1531,8 @@ def evaluate_health(values):
     vanos = values.get("E11")
     vanos_ex = values.get("E12")
     if is_ms43 and vanos is not None:
-        active = values.get("S42")
-        ready = values.get("S43")
+        active = values.get("VAN_AK")
+        ready = values.get("VAN_BR")
         if active:
             color, text = "green", "VANOS active"
         elif ready:
@@ -1522,15 +1568,20 @@ def evaluate_health(values):
             health["vanos"] = {"color": "green", "text": "VANOS idle", "value": f"{vanos:.0f}°"}
 
     # Knock retard: MS41 uses E217 (falling back to E24 "Global Knock
-    # Retard"). MS43 reassigns id E24 to "RON Fuel Quality" (a % value, not
-    # degrees of retard) -- E27 "Knock" is MS43's equivalent instead, so the
-    # E24 fallback must not apply to an MS43 sample or it reads a fuel-
-    # quality percentage as if it were a knock-retard angle.
-    knock = values.get("E217")
-    if knock is None and is_ms43:
-        knock = values.get("E27")
-    elif knock is None:
-        knock = values.get("E24")
+    # Retard"). MS43's verified status-group blocks (MS43_ENGINE_PARAMS/
+    # MS43_DIGITAL_BITS, see MS43_PROFILES' comment) don't document a
+    # knock-retard field at all -- no fallback for MS43, so this tile
+    # simply doesn't populate there rather than guessing at an id. E24
+    # specifically must never be read as knock retard for an MS43 sample
+    # either way: on MS41 it's degrees of retard, but nothing in this
+    # codebase still maps id E24 to anything for MS43 (the earlier,
+    # RomRaider-derived E24="RON Fuel Quality" mapping was dropped along
+    # with the rest of that unverified channel set).
+    knock = None
+    if not is_ms43:
+        knock = values.get("E217")
+        if knock is None:
+            knock = values.get("E24")
     if knock is not None:
         knock_abs = abs(knock)
         if knock_abs < 2:

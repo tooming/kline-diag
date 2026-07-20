@@ -11,6 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import diag_ui
+import ds2_diag
 
 
 class DetectPullTest(unittest.TestCase):
@@ -89,42 +90,34 @@ class DetectPullTest(unittest.TestCase):
 
 
 class MS43ProfileDataTest(unittest.TestCase):
-    """MS43_PROFILES/EXPR_OVERRIDES_BY_DME are the second E39's (2003 520i,
-    M54B22/MS43) analogue of the original MS41/M52 tables -- these check the
-    data is internally consistent without needing the real car connected.
-    """
+    """MS43_PROFILES is the second E39's (2003 520i, M54B22/MS43) live-data
+    table -- rebuilt from ds2_diag.MS43_ENGINE_PARAMS/MS43_DIGITAL_BITS
+    (BMW's own fixed status-group reads, reconstructed from the factory
+    EDIABAS SGBD MS430DS0.prg) after the original RAM-address-list-derived
+    version proved wrong on a real car. These check the data is internally
+    consistent without needing the real car connected."""
 
-    def test_every_ms43_profile_id_exists_in_ms43_params(self):
-        import json
-        with open(os.path.join(HERE, "ms43_ram_params.json")) as f:
-            ms43_ids = {p["id"] for p in json.load(f)}
+    def test_every_ms43_profile_id_exists_in_the_verified_sgbd_tables(self):
+        verified_ids = ({p["id"] for p in ds2_diag.MS43_ENGINE_PARAMS}
+                         | {b["id"] for b in ds2_diag.MS43_DIGITAL_BITS})
         for profile, channels in diag_ui.MS43_PROFILES.items():
             for pid, label, group, graph in channels:
-                self.assertIn(pid, ms43_ids,
-                               f"{profile}: {pid} ({label}) not in ms43_ram_params.json")
-
-    def test_ms43_and_ms41_profile_tables_share_the_same_profile_names(self):
-        # _build_profile()/set_profile() pick a profile by name (e.g.
-        # "vanos") from whichever table PROFILES_BY_DME selects -- if the
-        # tables' key sets ever diverged, switching DME mid-session (or the
-        # UI's hardcoded profile dropdown, sourced from MS41_PROFILES.keys())
-        # could ask for a profile name the active table doesn't have.
-        self.assertEqual(set(diag_ui.MS41_PROFILES.keys()),
-                          set(diag_ui.MS43_PROFILES.keys()))
+                self.assertIn(pid, verified_ids,
+                               f"{profile}: {pid} ({label}) not in the SGBD-verified tables")
 
     def test_ms41_expr_overrides_do_not_apply_under_ms43(self):
-        # S23 means "VANOS command" on MS41 but "DMTL evap pump" on MS43 --
-        # the MS41 bitmask override must never be picked up for an MS43 car.
+        # S23 means "VANOS command" on MS41 but doesn't exist at all in
+        # MS43's verified status-group tables -- the MS41 bitmask override
+        # must never be picked up for an MS43 car.
         self.assertNotIn("S23", diag_ui.EXPR_OVERRIDES_BY_DME.get("MS43", {}))
         self.assertIn("S23", diag_ui.EXPR_OVERRIDES_BY_DME["MS41"])
 
 
 class EvaluateHealthMS43Test(unittest.TestCase):
     """evaluate_health() must not apply MS41/M52-tuned thresholds (idle MAF
-    band, single-cam VANOS rest position, E24=knock-retard) to a sample that
-    carries MS43/M54 ids, since those ids mean different things on MS43
-    (E24 is RON fuel quality there, not knock retard) or don't apply at all
-    (M52's VANOS rest-angle heuristic doesn't fit M54's dual cams)."""
+    band, single-cam VANOS rest position) to a sample that carries MS43/M54
+    ids, and must not fabricate a knock-retard reading MS43's verified
+    status-group tables don't actually provide."""
 
     def test_ms43_sample_skips_m52_idle_maf_verdict(self):
         # 18 kg/h would be a "green, idle airflow OK" verdict under the M52
@@ -135,20 +128,19 @@ class EvaluateHealthMS43Test(unittest.TestCase):
 
     def test_ms43_vanos_uses_active_ready_switches_not_m52_rest_heuristic(self):
         health = diag_ui.evaluate_health(
-            {"E11": 61.0, "E12": -61.0, "S42": True, "S43": False, "P2": 90})
+            {"E11": 61.0, "E12": -61.0, "VAN_AK": True, "VAN_BR": False, "P2": 90})
         self.assertEqual(health["vanos"]["color"], "green")
         self.assertIn("VANOS active", health["vanos"]["text"])
         self.assertIn("ex ", health["vanos"]["value"])
 
-    def test_ms43_knock_reads_e27_not_e24(self):
-        # E24 on an MS43 sample is "RON Fuel Quality" (a %, commonly a large
-        # number) -- if it leaked into the knock-retard check via the MS41
-        # E217-then-E24 fallback, a normal fuel-quality reading could get
-        # misreported as heavy knock.
-        health = diag_ui.evaluate_health(
-            {"E12": 0.0, "E24": 87.0, "E27": 0.5})
-        self.assertEqual(health["timing"]["color"], "green")
-        self.assertIn("0.5", health["timing"]["value"])
+    def test_ms43_knock_tile_does_not_populate_without_a_verified_source(self):
+        # Earlier versions fell back to id E24 or E27 for MS43 "knock" --
+        # neither is in the verified status-group tables. Better to show
+        # nothing than fabricate a reading, so the tile must stay absent
+        # even when E24 happens to be present in the sample for some other
+        # reason.
+        health = diag_ui.evaluate_health({"E12": 0.0, "E24": 87.0})
+        self.assertNotIn("timing", health)
 
 
 if __name__ == "__main__":

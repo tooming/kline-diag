@@ -308,6 +308,141 @@ class MS41Logger:
         return out
 
 
+# MS43 (M54) engine-parameter block (DS2 status group 0x03, EDIABAS job
+# STATUS_MESSWERTEBLOCK) -- reconstructed from the factory EDIABAS SGBD
+# MS430DS0.prg (BEST/1 bytecode disassembly, see
+# reference_ms43_ds2_commands.ts). Unlike ms43_ram_params.json's custom RAM
+# address list (0B 01 arm / 0B 00 read) -- which turned out to return
+# garbage for most non-ADC channels on a real car (part number 7519308):
+# pegged-at-raw-extremes fuel trims, -43C coolant, 1300 kg/h MAF, gear "24"
+# -- this is BMW's own FIXED-format diagnostic job for this exact ECU
+# family: a single `0B 03` request always returns the same 41-byte block,
+# no arm step, no custom address list for the DME to (apparently) mishandle.
+# `id` reuses the existing P8/P9/P13/P2/P11/P17/P12/P10/E11/E12/E13/E14
+# names where diag_ui.py's evaluate_health()/live_sample() already look
+# those up generically across DMEs; everything else without a prior
+# concept keeps its real EDIABAS/SGBD name so it's traceable to the source.
+# offset is BYTE-3 in the SGBD's own numbering (payload starts at frame
+# offset 3 -- see body()); size in bytes, factorA/factorB linear scaling
+# (physical = raw*factorA + factorB), matching ms43-ram-params.json-style
+# 'expr' semantics but expressed as plain numbers since every one of these
+# is verified linear (no RomRaider BitWise()/nonlinear expr needed here).
+MS43_ENGINE_PARAMS = [
+    {"id": "P8",     "label": "RPM",                    "offset": 0,  "size": 2, "signed": False, "factorA": 1.0,         "factorB": 0.0,   "units": "RPM"},
+    {"id": "P9",     "label": "Vehicle Speed",           "offset": 2,  "size": 1, "signed": False, "factorA": 1.0,         "factorB": 0.0,   "units": "km/h"},
+    {"id": "P96",    "label": "Accelerator Position",    "offset": 3,  "size": 2, "signed": False, "factorA": 0.0018311,   "factorB": 0.0,   "units": "deg"},
+    {"id": "P13",    "label": "Throttle",                "offset": 5,  "size": 2, "signed": False, "factorA": 0.0018311,   "factorB": 0.0,   "units": "deg"},
+    {"id": "P12",    "label": "MAF",                     "offset": 7,  "size": 2, "signed": False, "factorA": 0.25,        "factorB": 0.0,   "units": "kg/h"},
+    {"id": "P11",    "label": "Intake Temp",             "offset": 9,  "size": 1, "signed": False, "factorA": 0.75,        "factorB": -48.0, "units": "°C"},
+    {"id": "P2",     "label": "Coolant Temp",            "offset": 10, "size": 1, "signed": False, "factorA": 0.75,        "factorB": -48.0, "units": "°C"},
+    {"id": "P4",     "label": "Oil Temp",                "offset": 11, "size": 1, "signed": False, "factorA": 0.796,       "factorB": -48.0, "units": "°C"},
+    {"id": "TCO_EX", "label": "Coolant Outlet Temp",     "offset": 12, "size": 1, "signed": False, "factorA": 0.75,        "factorB": -48.0, "units": "°C"},
+    {"id": "P10",    "label": "Ignition Advance",        "offset": 13, "size": 1, "signed": False, "factorA": -0.375,      "factorB": 72.0,  "units": "°KW"},
+    {"id": "P99",    "label": "Injector PW",             "offset": 14, "size": 2, "signed": False, "factorA": 0.0053333,  "factorB": 0.0,   "units": "ms"},
+    {"id": "ISAPWM_IS",  "label": "Idle Integrator",     "offset": 16, "size": 2, "signed": True,  "factorA": 0.0015,      "factorB": 0.0,   "units": "%"},
+    {"id": "ISAPWM_ISA", "label": "Idle Actuator",       "offset": 18, "size": 2, "signed": False, "factorA": 0.0015,      "factorB": 0.0,   "units": "%"},
+    {"id": "E11",    "label": "VANOS Intake",            "offset": 20, "size": 1, "signed": False, "factorA": 0.375,       "factorB": 60.0,  "units": "°CRK"},
+    {"id": "E12",    "label": "VANOS Exhaust",           "offset": 21, "size": 1, "signed": True,  "factorA": -0.375,      "factorB": -60.0, "units": "°CRK"},
+    {"id": "VB_IGK", "label": "Battery (IGK)",           "offset": 22, "size": 1, "signed": False, "factorA": 0.10156,     "factorB": 0.0,   "units": "V"},
+    {"id": "E13",    "label": "Lambda Trim Bank 1",      "offset": 23, "size": 2, "signed": False, "factorA": 0.0015259,  "factorB": -50.0, "units": "%"},
+    {"id": "E14",    "label": "Lambda Trim Bank 2",      "offset": 25, "size": 2, "signed": False, "factorA": 0.0015259,  "factorB": -50.0, "units": "%"},
+    {"id": "LSHPWM_UP_1", "label": "O2 Heater Pre-Cat Bank 1",  "offset": 27, "size": 1, "signed": False, "factorA": 0.391, "factorB": 0.0, "units": "%"},
+    {"id": "LSHPWM_UP_2", "label": "O2 Heater Pre-Cat Bank 2",  "offset": 28, "size": 1, "signed": False, "factorA": 0.391, "factorB": 0.0, "units": "%"},
+    {"id": "LSHPWM_DN_1", "label": "O2 Heater Post-Cat Bank 1", "offset": 29, "size": 1, "signed": False, "factorA": 0.391, "factorB": 0.0, "units": "%"},
+    {"id": "LSHPWM_DN_2", "label": "O2 Heater Post-Cat Bank 2", "offset": 30, "size": 1, "signed": False, "factorA": 0.391, "factorB": 0.0, "units": "%"},
+    {"id": "E2",     "label": "Load",                    "offset": 31, "size": 2, "signed": False, "factorA": 0.0212,      "factorB": 0.0,   "units": "mg/stroke"},
+    {"id": "NL_2",   "label": "O2 Sensor Pre-Cat Bank 1", "offset": 33, "size": 2, "signed": False, "factorA": 0.0000778,  "factorB": 0.0,   "units": "V"},
+    {"id": "NL_5",   "label": "O2 Sensor Pre-Cat Bank 2", "offset": 35, "size": 2, "signed": False, "factorA": 0.0000778,  "factorB": 0.0,   "units": "V"},
+    {"id": "ECFPWM_ECF", "label": "Electric Fan Duty",   "offset": 37, "size": 1, "signed": False, "factorA": 0.39063,     "factorB": 0.0,   "units": "%"},
+    {"id": "P24",    "label": "Atmospheric Pressure",    "offset": 38, "size": 2, "signed": False, "factorA": 0.08292,     "factorB": 0.0,   "units": "hPa"},
+    {"id": "P17",    "label": "Battery",                 "offset": 40, "size": 1, "signed": False, "factorA": 0.10156,     "factorB": 0.0,   "units": "V"},
+]
+
+# MS43 digital I/O block (DS2 status group 0x04, EDIABAS job
+# STATUS_DIGITAL) -- same SGBD source as MS43_ENGINE_PARAMS. Each bit tests
+# (payload[byte] & mask) == value. LL/TL/VL share byte 0 bits 1:0 as a
+# 3-way load-state enum rather than independent flags (see
+# ms43_load_state()) -- listed here too so a plain bit-scan still surfaces
+# them, just resolve state via ms43_load_state() instead of relying on
+# exactly one of the three reading True.
+MS43_DIGITAL_BITS = [
+    {"id": "S_KO",   "label": "AC Compressor Relay",   "byte": 0, "mask": 0x80, "value": 0x80},
+    {"id": "S_AC",   "label": "AC Request",            "byte": 0, "mask": 0x40, "value": 0x40},
+    {"id": "S_FGR",  "label": "Cruise Control Active", "byte": 0, "mask": 0x20, "value": 0x20},
+    {"id": "S_KUP",  "label": "Clutch Switch",         "byte": 0, "mask": 0x10, "value": 0x10},
+    {"id": "S_BLS",  "label": "Brake Light Switch",    "byte": 0, "mask": 0x08, "value": 0x08},
+    {"id": "S_BLTS", "label": "Brake Test Switch",     "byte": 0, "mask": 0x04, "value": 0x04},
+    {"id": "LL",     "label": "Idle (Leerlauf)",       "byte": 0, "mask": 0x03, "value": 0x01},
+    {"id": "TL",     "label": "Part Load (Teillast)",  "byte": 0, "mask": 0x03, "value": 0x02},
+    {"id": "VL",     "label": "Full Load (Volllast)",  "byte": 0, "mask": 0x03, "value": 0x03},
+    {"id": "LAMBDAREG1", "label": "Lambda Control Bank 1", "byte": 1, "mask": 0x40, "value": 0x40},
+    {"id": "LAMBDAREG2", "label": "Lambda Control Bank 2", "byte": 1, "mask": 0x80, "value": 0x80},
+    {"id": "SCHUB_AB", "label": "Fuel Cutoff (Overrun)", "byte": 1, "mask": 0x20, "value": 0x20},
+    {"id": "SCHUB",  "label": "Overrun Detected",      "byte": 1, "mask": 0x10, "value": 0x10},
+    {"id": "START",  "label": "Cranking",              "byte": 1, "mask": 0x08, "value": 0x08},
+    {"id": "FS",     "label": "Fault Memory Active",   "byte": 1, "mask": 0x04, "value": 0x04},
+    {"id": "EGS",    "label": "EGS (Transmission) Comm", "byte": 1, "mask": 0x02, "value": 0x02},
+    {"id": "CAN",    "label": "CAN Bus Active",        "byte": 1, "mask": 0x01, "value": 0x01},
+    {"id": "SLV",    "label": "Secondary Air Valve",   "byte": 2, "mask": 0x80, "value": 0x80},
+    {"id": "SLP",    "label": "Secondary Air Pump",    "byte": 2, "mask": 0x40, "value": 0x40},
+    {"id": "DMTL",   "label": "DMTL (Leak Detection)", "byte": 2, "mask": 0x04, "value": 0x04},
+    {"id": "R_EKP",  "label": "Fuel Pump Relay",       "byte": 2, "mask": 0x01, "value": 0x01},
+    {"id": "KAT_H",  "label": "Catalyst Heater",       "byte": 3, "mask": 0x80, "value": 0x80},
+    {"id": "MIL",    "label": "MIL (Check Engine)",    "byte": 3, "mask": 0x10, "value": 0x10},
+    {"id": "TEV",    "label": "Tank Vent Valve (EVAP)", "byte": 3, "mask": 0x08, "value": 0x08},
+    {"id": "DISA",   "label": "DISA Valve (Intake)",   "byte": 3, "mask": 0x04, "value": 0x04},
+    {"id": "ASC",    "label": "ASC/DSC Active",        "byte": 3, "mask": 0x02, "value": 0x02},
+    {"id": "TMOT",   "label": "Engine Temp Warning",   "byte": 3, "mask": 0x01, "value": 0x01},
+    {"id": "VAN_AK", "label": "VANOS Active",          "byte": 5, "mask": 0x80, "value": 0x80},
+    {"id": "VAN_BR", "label": "VANOS Ready",           "byte": 5, "mask": 0x40, "value": 0x40},
+    {"id": "VAN_PA", "label": "VANOS Parked",          "byte": 5, "mask": 0x20, "value": 0x20},
+    {"id": "GEB_OK", "label": "Crankshaft Signal OK",  "byte": 5, "mask": 0x10, "value": 0x10},
+]
+
+
+def ms43_load_state(values):
+    """LL/TL/VL (idle/part/full load) share one 2-bit field, not
+    independent flags -- resolve to a single label instead of relying on
+    the bit-scan leaving exactly one of the three True."""
+    return {1: "idle", 2: "part load", 3: "full load"}.get(
+        (1 if values.get("LL") else 0) or (2 if values.get("TL") else 0)
+        or (3 if values.get("VL") else 0))
+
+
+class MS43StatusLogger:
+    """Live data for the MS43 DME via BMW's own fixed status-group reads
+    (`0B 03` engine params + `0B 04` digital IO) instead of MS41Logger's
+    custom RAM address-list (`0B 01` arm / `0B 00` read). These are
+    factory EDIABAS jobs (STATUS_MESSWERTEBLOCK / STATUS_DIGITAL) -- same
+    request every poll, no arm step, verified against the SGBD source for
+    this exact ECU (part number 7519308, see MS43_ENGINE_PARAMS' comment).
+    """
+    def __init__(self, ds2):
+        self.ds2 = ds2
+
+    def sample(self):
+        out = {}
+        f = self.ds2.request(0x12, [0x0B, 0x03], timeout=0.5, retries=0)
+        if f is None or f[2] != 0xA0:
+            return None
+        data = body(f)
+        for p in MS43_ENGINE_PARAMS:
+            off, n = p["offset"], p["size"]
+            if off + n > len(data):
+                continue
+            v = int.from_bytes(data[off:off + n], "big")
+            if p["signed"]:
+                v -= (1 << (8 * n)) if v >= (1 << (8 * n - 1)) else 0
+            out[p["id"]] = round(v * p["factorA"] + p["factorB"], 3)
+        f = self.ds2.request(0x12, [0x0B, 0x04], timeout=0.5, retries=0)
+        if f is not None and f[2] == 0xA0:
+            data = body(f)
+            for b in MS43_DIGITAL_BITS:
+                if b["byte"] < len(data):
+                    out[b["id"]] = (data[b["byte"]] & b["mask"]) == b["value"]
+        return out or None
+
+
 def ram_read(ds2, addresses, width=1):
     """Read-only RAM explorer (Phase 7.1). Reads a list of 16/32-bit MS41
     RAM addresses via the SAME address-list mechanism MS41Logger uses

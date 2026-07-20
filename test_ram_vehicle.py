@@ -11,6 +11,56 @@ import ds2_diag
 import vehicle_profiles as vp
 
 
+class _FakeDS2:
+    """Canned responses for MS43StatusLogger -- no hardware needed. Frame
+    shape matches ds2_diag.body()'s slicing: [addr, len, status, *payload,
+    checksum]; body() strips the first 3 and the trailing checksum, so the
+    checksum byte's actual value never matters here (never read back)."""
+    def __init__(self, responses):
+        self.responses = responses  # {tuple(payload): [status, *data]}
+
+    def request(self, addr, payload, timeout=0.5, retries=0):
+        key = tuple(payload)
+        if key not in self.responses:
+            return None
+        status, *data = self.responses[key]
+        return [addr, len(data) + 4, status, *data, 0x00]
+
+
+def test_ms43status_logger_decodes_engine_params_at_documented_offsets():
+    # 41-byte 0B-03 payload; only the offsets under test are non-zero.
+    data = [0] * 41
+    data[0:2] = (2925).to_bytes(2, "big")           # N (RPM) = 2925 raw -> 2925 RPM
+    data[10] = 130                                   # TCO (coolant) -> 130*0.75-48 = 49.5C
+    data[20] = 139                                    # CAM_AV_IN -> 139*0.375+60 = 112.125
+    data[40] = 135                                    # VB (battery) -> 135*0.10156 = 13.71V
+    ds2 = _FakeDS2({(0x0B, 0x03): [0xA0, *data]})
+    logger = ds2_diag.MS43StatusLogger(ds2)
+    s = logger.sample()
+    assert s["P8"] == 2925, s["P8"]
+    assert abs(s["P2"] - 49.5) < 0.01, s["P2"]
+    assert abs(s["E11"] - 112.125) < 0.01, s["E11"]
+    assert abs(s["P17"] - 13.711) < 0.01, s["P17"]
+    print("test_ms43status_logger_decodes_engine_params_at_documented_offsets OK")
+
+
+def test_ms43status_logger_decodes_vanos_digital_bits():
+    data = [0] * 6
+    data[5] = 0x80  # VAN_AK set, VAN_BR/VAN_PA clear
+    ds2 = _FakeDS2({(0x0B, 0x03): None, (0x0B, 0x04): [0xA0, *data]})
+    # No engine-params response arranged -> sample() should still surface
+    # the digital bits it did get (None-frame short-circuits the whole
+    # sample() to None instead in the real request() contract, so simulate
+    # a real ECU that answers 0B-03 with an all-zero block instead).
+    ds2.responses[(0x0B, 0x03)] = [0xA0] + [0] * 41
+    logger = ds2_diag.MS43StatusLogger(ds2)
+    s = logger.sample()
+    assert s["VAN_AK"] is True
+    assert s["VAN_BR"] is False
+    assert s["VAN_PA"] is False
+    print("test_ms43status_logger_decodes_vanos_digital_bits OK")
+
+
 def test_ram_diff_ranks_by_magnitude():
     a = {0xE9E6: 71, 0xDAA4: 0, 0xDA2A: 800, 0xDA50: 100}
     b = {0xE9E6: 130, 0xDAA4: 22, 0xDA2A: 3200, 0xDA50: 100}
@@ -82,6 +132,8 @@ def test_safe_eval_expr_rejects_unsafe():
 
 
 if __name__ == "__main__":
+    test_ms43status_logger_decodes_engine_params_at_documented_offsets()
+    test_ms43status_logger_decodes_vanos_digital_bits()
     test_ram_diff_ranks_by_magnitude()
     test_ram_diff_threshold()
     test_profiles_valid()
