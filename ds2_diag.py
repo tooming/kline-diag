@@ -351,8 +351,17 @@ MS43_ENGINE_PARAMS = [
     {"id": "LSHPWM_DN_1", "label": "O2 Heater Post-Cat Bank 1", "offset": 29, "size": 1, "signed": False, "factorA": 0.391, "factorB": 0.0, "units": "%"},
     {"id": "LSHPWM_DN_2", "label": "O2 Heater Post-Cat Bank 2", "offset": 30, "size": 1, "signed": False, "factorA": 0.391, "factorB": 0.0, "units": "%"},
     {"id": "E2",     "label": "Load",                    "offset": 31, "size": 2, "signed": False, "factorA": 0.0212,      "factorB": 0.0,   "units": "mg/stroke"},
-    {"id": "NL_2",   "label": "O2 Sensor Pre-Cat Bank 1", "offset": 33, "size": 2, "signed": False, "factorA": 0.0000778,  "factorB": 0.0,   "units": "V"},
-    {"id": "NL_5",   "label": "O2 Sensor Pre-Cat Bank 2", "offset": 35, "size": 2, "signed": False, "factorA": 0.0000778,  "factorB": 0.0,   "units": "V"},
+    # Offset 33/35 (SGBD names STATUS_K_MW_2/STATUS_K_MW_5, "Klopfsensor
+    # Zyl.2/5 MW" = knock sensor cyl 2/5 measured value) -- reference_ms43_
+    # ds2_commands.ts mislabeled these "O2 Sensor Pre-Cat Bank 1/2"
+    # (id NL_2/NL_5, presumably a mistranscription against RomRaider's O2-
+    # sensor-ish "NL" convention); corrected once the primary SGBD doc
+    # (sgbd_full/docs/sgbd/MS430DS0.md, BETRIEBSWTAB) was available to
+    # cross-check byte-for-byte against. This block has no genuine O2
+    # sensor *voltage* field at all -- would need the ADC_SENSORS (0x02)
+    # channel-selector group, not yet wired in.
+    {"id": "K_MW_2", "label": "Knock Sensor Cyl 2 (measured)", "offset": 33, "size": 2, "signed": False, "factorA": 0.0000778, "factorB": 0.0, "units": "V"},
+    {"id": "K_MW_5", "label": "Knock Sensor Cyl 5 (measured)", "offset": 35, "size": 2, "signed": False, "factorA": 0.0000778, "factorB": 0.0, "units": "V"},
     {"id": "ECFPWM_ECF", "label": "Electric Fan Duty",   "offset": 37, "size": 1, "signed": False, "factorA": 0.39063,     "factorB": 0.0,   "units": "%"},
     {"id": "P24",    "label": "Atmospheric Pressure",    "offset": 38, "size": 2, "signed": False, "factorA": 0.08292,     "factorB": 0.0,   "units": "hPa"},
     {"id": "P17",    "label": "Battery",                 "offset": 40, "size": 1, "signed": False, "factorA": 0.10156,     "factorB": 0.0,   "units": "V"},
