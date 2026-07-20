@@ -29,7 +29,7 @@ import webview
 import paths
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PORT = int(os.environ.get("BMW_DIAG_PORT", "8039"))
+PORT = int(os.environ.get("OPENDIAG_PORT", "8039"))
 BASE = f"http://127.0.0.1:{PORT}"
 
 
@@ -98,7 +98,7 @@ def main():
 
     atexit.register(cleanup)
     webview.create_window(
-        "BMW Diagnostics", BASE,
+        "OpenDiag", BASE,
         width=1280, height=860, min_size=(900, 600))
     try:
         webview.start()

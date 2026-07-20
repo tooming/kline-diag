@@ -11,7 +11,7 @@ PyInstaller:
 * **data_dir()** — writable runtime data (kline_raw.log, drive/​power logs,
   fault snapshots, the VIN backup tree, verified_maps.json). In a frozen
   build the project dir is read-only/ephemeral, so these must live in a
-  persistent per-user folder (``%APPDATA%\\BMWDiag`` on Windows). The
+  persistent per-user folder (``%APPDATA%\\OpenDiag`` on Windows). The
   backup tree in particular MUST persist — it's the safety net behind every
   module write.
 
@@ -46,10 +46,26 @@ def _user_data_base():
 
 
 def data_dir():
-    """Directory for writable runtime data (created if missing)."""
-    d = os.path.join(_user_data_base(), "BMWDiag") if is_frozen() else _HERE
-    os.makedirs(d, exist_ok=True)
-    return d
+    """Directory for writable runtime data (created if missing).
+
+    Was named "BMWDiag" (pre-rename); a frozen build's existing users have
+    real data there (backups, drive logs, cloud_session.json) that a plain
+    rename to "OpenDiag" would silently orphan. One-time migration: if the
+    old folder exists and the new one doesn't yet, move it rather than
+    starting fresh."""
+    if not is_frozen():
+        return _HERE
+    base = _user_data_base()
+    new_d = os.path.join(base, "OpenDiag")
+    old_d = os.path.join(base, "BMWDiag")
+    if not os.path.isdir(new_d) and os.path.isdir(old_d):
+        try:
+            os.rename(old_d, new_d)
+        except OSError:
+            os.makedirs(old_d, exist_ok=True)
+            return old_d  # cross-device or permission issue -- keep using it
+    os.makedirs(new_d, exist_ok=True)
+    return new_d
 
 
 def data_path(*parts):
