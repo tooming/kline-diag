@@ -196,12 +196,7 @@
   <span id="recbadge" class="badge" style="display:none">● REC</span>
   <span id="pullbadge" class="badge" style="display:none;background:#ff3b30;color:#fff;font-weight:700">🔴 PULL</span>
   <span style="flex:1"></span>
-  <select id="protosel">
-    <option value="auto">auto-detect</option>
-    <option value="e39">DS2 (older BMW)</option>
-    <option value="e87">KWP2000 (newer BMW)</option>
-    <option value="demo">Demo (no car)</option>
-  </select>
+  <a href="#" id="demolink" class="muted" style="font-size:12px">try demo</a>
   <button id="connect">Connect</button>
 </header>
 <main>
@@ -3286,7 +3281,19 @@ $("readall").onclick = async () => {
 
 $("connect").onclick = async () => {
   $("conn").textContent = "connecting…";
-  setState(await api("/api/connect", { protocol: $("protosel").value }));
+  setState(await api("/api/connect", { protocol: "auto" }));
+};
+
+// End users just want to plug in and connect -- protocol/chassis choice
+// (DS2 vs KWP2000, which BMW) used to be a dropdown here, but auto-detect
+// already picks correctly every time (see diag_ui.py's connect()); the
+// manual per-protocol override wasn't worth surfacing as a decision.
+// Demo mode is a genuinely different case (no car at all, not a protocol
+// pick), so it stays as its own low-emphasis entry point.
+$("demolink").onclick = async (e) => {
+  e.preventDefault();
+  $("conn").textContent = "connecting…";
+  setState(await api("/api/connect", { protocol: "demo" }));
 };
 
 // Snapshot create button
