@@ -68,7 +68,7 @@ datas += [(certifi.where(), '.')]
 # PyInstaller's static analysis can't miss any.
 hiddenimports = [
     'diag_ui', 'power_diag', 'ds2_diag', 'transaction', 'coding',
-    'operations', 'dme_registry', 'snapshot', 'adaptations',
+    'operations', 'dme_registry', 'ecu_registry', 'snapshot', 'adaptations',
     'actuators', 'correlate', 'plugins', 'vehicle_profiles',
     'trace', 'dev_console', 'paths',
 ]

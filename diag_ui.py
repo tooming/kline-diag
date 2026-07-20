@@ -530,6 +530,7 @@ class E39Adapter:
                           f"({ds2_diag.STATUS_BYTE.get(st, '?')})"}
 
     def scan(self):
+        import ecu_registry
         out = []
         for addr, name in self.modules.items():
             f = self.ds2.ident(addr, timeout=0.3)
@@ -538,7 +539,8 @@ class E39Adapter:
             data = ds2_diag.body(f)
             asc = "".join(chr(c) if 32 <= c < 127 else "." for c in data)
             out.append({"addr": addr, "name": name,
-                        "ident": hexs(data), "ident_ascii": asc})
+                        "ident": hexs(data), "ident_ascii": asc,
+                        "variant": ecu_registry.detect_variant(addr, asc)})
         return out
 
     def faults(self, addr):

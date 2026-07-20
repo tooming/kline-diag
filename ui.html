@@ -3189,12 +3189,23 @@ function hex(a) { return "0x" + a.toString(16).toUpperCase().padStart(2, "0"); }
 function modCard(m) {
   const div = document.createElement("div");
   div.className = "mod"; div.id = "mod" + m.addr;
+  // ecu_registry's variant match (E39 only) -- a confirmed match names the
+  // real SGBD doc; otherwise show the chassis-narrowed candidates (if any)
+  // as an unconfirmed hint, never claimed as identified.
+  let variantLine = "";
+  const v = m.variant;
+  if (v && v.matched) {
+    variantLine = `<div class="muted" style="font-size:11px">identified: ${v.sgbd} (part ${v.matched_part})</div>`;
+  } else if (v && v.sgbd_candidates && v.sgbd_candidates.length) {
+    variantLine = `<div class="muted" style="font-size:11px">unidentified — candidates: ${v.sgbd_candidates.join(", ")}</div>`;
+  }
   div.innerHTML = `
     <div class="mod-head" onclick="toggleFaults(${m.addr})">
       <span class="mod-addr">${hex(m.addr)}</span>
       <span class="mod-name">${m.name}</span>
       <span class="pill unk" id="pill${m.addr}">?</span>
     </div>
+    ${variantLine}
     <div class="faults" id="faults${m.addr}"></div>`;
   return div;
 }
