@@ -1,0 +1,3 @@
+[submodule "sgbd_full"]
+	path = sgbd_full
+	url = https://github.com/emdzej/ediabasx-docs-sgbd.git
