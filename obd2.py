@@ -152,22 +152,36 @@ def request_functional(port, mode, pid=None, timeout=0.6):
     return results
 
 
+def parse_dtc_response(body):
+    """Mode 03 positive-response body (everything after the 0x43 SID byte):
+    a 1-byte DTC count followed by 2-byte DTC pairs, per SAE J2012. This
+    payload shape is transport-agnostic — same bytes whether they arrived
+    via ISO-TP/CAN (request_functional, below) or a single K-line frame
+    (power_diag.KLine) — so every transport shares this one decoder."""
+    codes = []
+    pairs = body[1:] if body else b""  # first byte is the DTC count, not data
+    for i in range(0, len(pairs) - 1, 2):
+        hi, lo = pairs[i], pairs[i + 1]
+        if hi == 0 and lo == 0:
+            continue
+        codes.append(decode_dtc_2byte(hi, lo))
+    return codes
+
+
+def parse_vin_response(body):
+    """Mode 09 PID 0x02 positive-response body (everything after the
+    0x49 0x02 SID+PID echo): a 1-byte item count + 17 ASCII VIN characters.
+    Transport-agnostic like parse_dtc_response — shared by CAN and K-line."""
+    text = bytes(b for b in body[1:] if 0x20 <= b < 0x7F).decode(
+        "ascii", "ignore")
+    return text if len(text) >= 11 else None
+
+
 def read_dtcs(port, timeout=1.0):
     """Mode 03 — stored DTCs from every responder. Returns
     {responder_can_id: [dtc_string, ...]}."""
     raw = request_functional(port, MODE_STORED_DTC, timeout=timeout)
-    out = {}
-    for can_id, body in raw.items():
-        codes = []
-        # first byte of a Mode 03 response is the DTC count, not data
-        pairs = body[1:] if body else b""
-        for i in range(0, len(pairs) - 1, 2):
-            hi, lo = pairs[i], pairs[i + 1]
-            if hi == 0 and lo == 0:
-                continue
-            codes.append(decode_dtc_2byte(hi, lo))
-        out[can_id] = codes
-    return out
+    return {can_id: parse_dtc_response(body) for can_id, body in raw.items()}
 
 
 def clear_dtcs(port, timeout=2.0):
@@ -179,12 +193,10 @@ def clear_dtcs(port, timeout=2.0):
 def read_vin(port, timeout=1.0):
     raw = request_functional(port, MODE_VEHICLE_INFO, pid=0x02,
                               timeout=timeout)
-    for can_id, body in raw.items():
-        # body: 1 byte "number of data items" (=1) + 17 ASCII VIN bytes
-        text = bytes(b for b in body[1:] if 0x20 <= b < 0x7F).decode(
-            "ascii", "ignore")
-        if len(text) >= 11:
-            return text
+    for body in raw.values():
+        vin = parse_vin_response(body)
+        if vin:
+            return vin
     return None
 
 

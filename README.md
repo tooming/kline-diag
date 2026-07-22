@@ -176,6 +176,20 @@ from openly published BMW SGBD job documentation
 original German texts are kept in the same file under `ort_de`/`art_de`);
 the raw bytes are always shown alongside.
 
+## Bonus: generic OBD-II over K-line, any make (`Obd2Adapter` in `diag_ui.py`)
+
+Cars with no manufacturer-specific support here yet — e.g. a **2000 Porsche
+911 (996.1)** — still expose the K-line's legislated layer: SAE J1979
+Mode 01 (live data), Mode 03/04 (stored/clear DTCs), Mode 09 (VIN). The
+same K+DCAN cable works; `Obd2Adapter` fast-inits KWP2000 at the standard
+functional address `0x33` (`power_diag.OBD_FUNCTIONAL`) instead of a
+manufacturer's physical module address, so no per-car module map is
+needed — it's the fallback the web dashboard's auto-detect reaches for
+once the BMW-specific adapters don't answer. No coding/adaptations and no
+manufacturer fault-code text (there's no per-module map to act on, and no
+generic P-code description table yet) — just what every OBD-II compliant
+car is required to expose. See `vehicle_profiles.py`'s `porsche_996` entry.
+
 ## Web dashboard (`diag_ui.py`)
 
 A real-time browser UI covering both cars — fault viewing/clearing and live
@@ -185,8 +199,9 @@ graphs:
 python3 diag_ui.py        # then open http://localhost:8039
 ```
 
-- Auto-detects the connected car (DS2 for the E39, KWP2000 for the E87);
-  manual protocol override in the header.
+- Auto-detects the connected car (DS2 for the E39, KWP2000 for the E87,
+  generic OBD-II for anything else — see the bonus section above); manual
+  protocol override in the header.
 - **Modules panel**: scan, per-module fault list with decoded texts where
   tables exist, re-read and clear buttons. Every clear saves a snapshot of
   the memory to `fault_snapshots.log` first and re-reads afterwards.
