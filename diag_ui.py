@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Web UI for BMW K-line diagnostics — faults, clearing, live data + graphs.
+"""Web UI for K-line diagnostics — faults, clearing, live data + graphs.
 
 Serves a single-page dashboard (ui.html) and a JSON/SSE API on top of the
 existing transports:
-  - E87 2005 (KWP2000 fast init, 10400 8N1)  -> power_diag.py
-  - E39 1998 (DS2, 9600 8E1)                 -> ds2_diag.py
+  - E87 2005 (KWP2000 fast init, 10400 8N1)      -> power_diag.py
+  - E39 1998 (DS2, 9600 8E1)                     -> ds2_diag.py
+  - Any OBD-II car (SAE J1979 legislated data,
+    KWP2000 fast init to the functional address) -> Obd2Adapter, below
 
 Run:  python3 diag_ui.py  [--port-http 8039]
 then open http://localhost:8039
@@ -369,6 +371,7 @@ class E39Adapter:
     proto = "e39"
     modules = ds2_diag.E39_MODULES
     vin = "WBAXXXXXXXXXXXXXX"  # placeholder until a real read is confirmed
+    vin_placeholder = "WBAXXXXXXXXXXXXXX"
 
     def read_vin(self):
         """DS2 has no confirmed standard VIN job across this ECU set, so we
@@ -769,6 +772,7 @@ class E87Adapter:
                                 # detect()/read_vin() once confirmed (same
                                 # contract as E39Adapter), becoming the
                                 # backup/passport key from then on
+    vin_placeholder = "WBAXXXXXXXXXXXXXX"
     vin_suffix = None          # last 7 chars of the real VIN (display-only
                                 # fallback for when the full read fails —
                                 # see read_vin_suffix())
@@ -1078,6 +1082,209 @@ class E87Adapter:
         return s
 
 
+class Obd2Adapter:
+    """Generic legislated OBD-II (SAE J1979 Mode 01/03/04/09) over K-line,
+    KWP2000 fast-init at the standard functional address 0x33 -- see
+    power_diag.OBD_FUNCTIONAL. Unlike E39Adapter/E87Adapter this targets no
+    manufacturer-specific module address, just the layer every OBD-II
+    compliant car (this toolkit's first non-BMW car) is legislated to
+    expose: current data, stored/clear DTCs, VIN. No coding/adaptations --
+    there is no per-module map to act on, only the one functional ECU
+    responder. Request encoding + response decoding (obd2.decode_pid,
+    obd2.parse_dtc_response, obd2.parse_vin_response) are the exact same
+    SAE-formula functions the CAN/UDS Octavia and the E87's KWP2000 PID
+    reads already use -- only the K-line framing here is new, the PID math
+    is transport-agnostic (see E87Adapter's _PID_CHANNELS comment)."""
+    name = "Generic OBD-II (SAE J1979, K-line)"
+    proto = "obd2"
+    vin = "OBD2XXXXXXXXXXXXX"  # placeholder -- promoted by detect()/read_vin()
+    vin_placeholder = "OBD2XXXXXXXXXXXXX"
+    modules = {power_diag.OBD_FUNCTIONAL:
+               "Engine control (OBD-II functional broadcast)"}
+    live_channels = [
+        {"id": "battery_v", "label": "Battery", "unit": "V",
+         "group": "Temps/V", "graph": True},
+        {"id": "rpm", "label": "RPM", "unit": "rpm",
+         "group": "Engine", "graph": True},
+        {"id": "coolant_c", "label": "Coolant", "unit": "°C",
+         "group": "Temps/V", "graph": False},
+        {"id": "speed_kmh", "label": "Speed", "unit": "km/h",
+         "group": "Engine", "graph": True},
+        {"id": "engine_load", "label": "Engine Load", "unit": "%",
+         "group": "Engine", "graph": True},
+        {"id": "throttle", "label": "Throttle", "unit": "%",
+         "group": "Engine", "graph": True},
+        {"id": "iat_c", "label": "Intake Air", "unit": "°C",
+         "group": "Temps/V", "graph": False},
+        {"id": "maf", "label": "MAF", "unit": "g/s",
+         "group": "Engine", "graph": True},
+        {"id": "power_kw", "label": "Est. Crank Power", "unit": "kW",
+         "group": "Engine", "graph": True},
+        {"id": "torque_nm", "label": "Est. Crank Torque", "unit": "Nm",
+         "group": "Engine", "graph": True},
+        {"id": "timing_advance", "label": "Timing Advance", "unit": "°",
+         "group": "Engine", "graph": False},
+        {"id": "stft", "label": "Short Fuel Trim", "unit": "%",
+         "group": "Fuel", "graph": False},
+        {"id": "ltft", "label": "Long Fuel Trim", "unit": "%",
+         "group": "Fuel", "graph": False},
+        {"id": "map_kpa", "label": "Manifold Pressure", "unit": "kPa",
+         "group": "Engine", "graph": False},
+        {"id": "baro_kpa", "label": "Barometric Pressure", "unit": "kPa",
+         "group": "Engine", "graph": False},
+        {"id": "oil_temp_c", "label": "Oil Temp", "unit": "°C",
+         "group": "Temps/V", "graph": False},
+        {"id": "fuel_status", "label": "Fuel System Status", "unit": "",
+         "group": "Fuel", "graph": False},
+        {"id": "mil_distance_km", "label": "Distance w/ MIL On", "unit": "km",
+         "group": "Engine", "graph": False},
+    ]
+    # channel id -> Mode-01 PID. Whichever of these this car's ECU doesn't
+    # support just stays absent from every live_sample() (same as E87's
+    # unsupported PIDs) -- nothing here assumes a specific engine/ECU.
+    _PID_CHANNELS = {
+        "rpm": 0x0C, "coolant_c": 0x05, "speed_kmh": 0x0D,
+        "engine_load": 0x04, "throttle": 0x11, "iat_c": 0x0F, "maf": 0x10,
+        "timing_advance": 0x0E, "stft": 0x06, "ltft": 0x07,
+        "map_kpa": 0x0B, "baro_kpa": 0x33, "oil_temp_c": 0x5C,
+        "battery_v": 0x42, "mil_distance_km": 0x21,
+    }
+
+    def __init__(self):
+        self.kl = KLine(rawlog_path=os.path.join(DATA, "kline_raw.log"))
+        self.kl.log = log_hook(self.kl.log)
+        self._live_init = False
+
+    def close(self):
+        self.kl.close()
+
+    def detect(self):
+        r = self.kl.fast_init(power_diag.OBD_FUNCTIONAL, functional=True)
+        if r is not None:
+            v = self.read_vin()
+            if v:
+                self.vin = v      # promote placeholder -> confirmed real VIN
+            self.kl.stop_comm(power_diag.OBD_FUNCTIONAL)
+            return True
+        return False
+
+    def read_vin(self):
+        """SAE J1979 Mode 09 PID 0x02. Response body after the 0x49 0x02
+        SID+PID echo is item-count + 17 ASCII bytes -- identical shape to
+        the CAN/Octavia path, so obd2.parse_vin_response decodes it too."""
+        try:
+            frames = self.kl.request(b"\x09\x02", power_diag.OBD_FUNCTIONAL,
+                                     functional=True, timeout=1.0)
+            for f in frames:
+                p = frame_payload(f)
+                if p[:2] == b"\x49\x02":
+                    return obd2.parse_vin_response(p[2:])
+        except Exception:
+            pass
+        return None
+
+    def _supported_pids(self):
+        """Walk the Mode-01 supported-PID bitmap (PIDs 0x00/0x20/0x40/...),
+        same algorithm as power_diag.mode_pids() but against the functional
+        address instead of a hardcoded physical DME, and returning the list
+        instead of printing/exiting."""
+        supported = set()
+        base = 0x00
+        while True:
+            d = power_diag.obd_pid(self.kl, base, power_diag.OBD_FUNCTIONAL,
+                                   functional=True, timeout=0.4)
+            if not d or len(d) < 4:
+                break
+            mask = int.from_bytes(d[:4], "big")
+            for i in range(32):
+                if mask & (1 << (31 - i)):
+                    supported.add(base + 1 + i)
+            if not (mask & 1) or base >= 0xE0:
+                break
+            base += 0x20
+        return sorted(supported)
+
+    def scan(self):
+        self._live_init = False
+        if self.kl.fast_init(power_diag.OBD_FUNCTIONAL, functional=True) is None:
+            return []
+        supported = self._supported_pids()
+        self.kl.stop_comm(power_diag.OBD_FUNCTIONAL)
+        return [{"addr": power_diag.OBD_FUNCTIONAL,
+                "name": self.modules[power_diag.OBD_FUNCTIONAL],
+                "ident": f"{len(supported)} Mode-01 PIDs supported",
+                "ident_ascii": " ".join(f"{p:02X}" for p in supported)}]
+
+    def faults(self, addr, _init=True):
+        if _init:
+            self._live_init = False
+            if self.kl.fast_init(power_diag.OBD_FUNCTIONAL,
+                                 functional=True) is None:
+                return {"ok": False, "error": "no response to init"}
+        frames = self.kl.request(b"\x03", power_diag.OBD_FUNCTIONAL,
+                                 functional=True, timeout=1.0)
+        codes, raw = None, b""
+        for f in frames:
+            p = frame_payload(f)
+            if p[:1] == b"\x43":
+                codes = obd2.parse_dtc_response(p[1:])
+                raw = p
+                break
+        if _init:
+            self.kl.stop_comm(power_diag.OBD_FUNCTIONAL)
+        if codes is None:
+            return {"ok": False, "error": "no response to DTC read"}
+        entries = [{"code": c, "raw": c, "text": "", "status": ""}
+                  for c in codes]
+        return {"ok": True, "count": len(entries), "entries": entries,
+                "raw": hexs(raw)}
+
+    def clear(self, addr):
+        self._live_init = False
+        if self.kl.fast_init(power_diag.OBD_FUNCTIONAL,
+                             functional=True) is None:
+            return {"ok": False, "error": "no response to init"}
+        frames = self.kl.request(b"\x04", power_diag.OBD_FUNCTIONAL,
+                                 functional=True, timeout=2.0)
+        cleared = any(frame_payload(f)[:1] == b"\x44" for f in frames)
+        after = self.faults(addr, _init=False)
+        self.kl.stop_comm(power_diag.OBD_FUNCTIONAL)
+        return {"ok": cleared,
+                "status": "cleared" if cleared else "no answer",
+                "after": after}
+
+    def live_sample(self):
+        if not self._live_init:
+            if self.kl.fast_init(power_diag.OBD_FUNCTIONAL,
+                                 functional=True) is None:
+                return {}
+            self._live_init = True
+        s = {}
+        for chan_id, pid in self._PID_CHANNELS.items():
+            d = power_diag.obd_pid(self.kl, pid, power_diag.OBD_FUNCTIONAL,
+                                   functional=True, retries=0, timeout=0.3)
+            if d:
+                s[chan_id] = round(obd2.decode_pid(pid, d), 2)
+        # PID 0x03 (fuel system status) decodes to text, not a number --
+        # kept out of _PID_CHANNELS' uniform round() loop above, same as
+        # E87Adapter.live_sample().
+        d = power_diag.obd_pid(self.kl, 0x03, power_diag.OBD_FUNCTIONAL,
+                               functional=True, retries=0, timeout=0.3)
+        if d:
+            txt = obd2.decode_fuel_system_status(d[0])
+            if txt:
+                s["fuel_status"] = txt
+        if "maf" in s:
+            pw, tq = estimate_power_torque(s["maf"], s.get("rpm") or 0)
+            if pw is not None:
+                s["power_kw"] = pw
+            if tq is not None:
+                s["torque_nm"] = tq
+        if not s:
+            self._live_init = False  # force re-init next time
+        return s
+
+
 ADAPTER = None            # current protocol adapter
 ADAPTER_ERR = ""
 
@@ -1111,9 +1318,14 @@ def gather_vehicle_info():
     vehicle_info = {
         "vin": ADAPTER.vin,
         # generic across adapters: vin has been promoted from the
-        # placeholder once any adapter's read_vin() confirms a
-        # real one (see E39Adapter/E87Adapter.detect())
-        "vin_confirmed": ADAPTER.vin != "WBAXXXXXXXXXXXXXX",
+        # placeholder once any adapter's read_vin() confirms a real one
+        # (see E39Adapter/E87Adapter/Obd2Adapter.detect()) -- compared
+        # against each adapter class' own vin_placeholder rather than a
+        # single hardcoded "WBA..." string, since Obd2Adapter's placeholder
+        # isn't a BMW-shaped VIN. DemoAdapter inherits E39Adapter's
+        # placeholder unchanged, so its fixed demo VIN (never equal to it)
+        # still reports confirmed, same as before this was generalized.
+        "vin_confirmed": ADAPTER.vin != ADAPTER.vin_placeholder,
         "protocol": ADAPTER.proto,
         "adapter_name": ADAPTER.name
     }
@@ -1175,6 +1387,14 @@ def gather_vehicle_info():
         vehicle_info["vin_suffix"] = getattr(ADAPTER, "vin_suffix", None)
         with CAR_LOCK:
             vehicle_info["dme_ident"] = ADAPTER.dme_ident()
+
+    elif ADAPTER.proto == "obd2":
+        # Generic OBD-II: no manufacturer module map or DME ident to read,
+        # only what SAE J1979 legislates (see Obd2Adapter's docstring) --
+        # same "don't guess model/engine" stance as the E87 branch above.
+        vehicle_info["model"] = "Unknown (generic OBD-II)"
+        vehicle_info["engine"] = None
+        vehicle_info["engine_evidence"] = "not auto-detected"
 
     # Add transmission type (default unknown, can be enhanced)
     vehicle_info["transmission"] = "Unknown"
@@ -1793,9 +2013,10 @@ def connect(proto="auto"):
         if ADAPTER:
             ADAPTER.close()
             ADAPTER = None
-        order = {"auto": [E39Adapter, E87Adapter],
+        order = {"auto": [E39Adapter, E87Adapter, Obd2Adapter],
                  "demo": [DemoAdapter],
-                 "e39": [E39Adapter], "e87": [E87Adapter]}[proto]
+                 "e39": [E39Adapter], "e87": [E87Adapter],
+                 "obd2": [Obd2Adapter]}[proto]
         errs = []
         for cls in order:
             try:

@@ -88,6 +88,28 @@ PROFILES = {
                  "`vag_diag.py sweep` on the real car to discover it rather "
                  "than trusting a guessed table.",
     },
+    "porsche_996": {
+        "chassis": "996.1",
+        "name": "2000 Porsche 911 Carrera (M96.01, Motronic ME7.2)",
+        "protocol": "kwp2000",
+        "baud": 10400,
+        "parity": None,
+        "vin_source": {"mode": 0x09, "pid": 0x02},
+        "voltage": {"kind": "obd_pid", "pid": 0x42, "scale": 1.0},
+        "modules": {
+            0x33: "Engine control (SAE J1979 OBD-II functional broadcast)",
+        },
+        "notes": "Legislated OBD-II only (diag_ui.py's Obd2Adapter): Mode "
+                 "01 live data, Mode 03/04 stored/clear DTCs, Mode 09 VIN, "
+                 "over KWP2000 fast-init at the standard functional address "
+                 "0x33 -- no Porsche-specific addressing needed since this "
+                 "is the legislated layer every OBD-II car exposes. Unlike "
+                 "the E39/E87 entries above there is no manufacturer module "
+                 "map here (no PIWIS-equivalent per-module fault memory or "
+                 "coding) -- that would need the physical car to discover "
+                 "Porsche's proprietary K-line addressing, same caveat as "
+                 "octavia_mk3's CAN module map above.",
+    },
     # --- Template for adding a new chassis (needs the physical car to
     #     verify addresses before use). Kept commented so it is inert. ---
     # "e46": {

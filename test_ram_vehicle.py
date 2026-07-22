@@ -91,7 +91,7 @@ def test_profiles_valid():
 def test_profile_lookup():
     assert "DME" in vp.module_name("e39", 0x12)
     assert vp.get_profile("nonexistent") is None
-    assert len(vp.list_profiles()) == 3
+    assert len(vp.list_profiles()) == 4
     print("test_profile_lookup OK")
 
 
