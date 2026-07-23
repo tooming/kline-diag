@@ -4188,7 +4188,7 @@ async function loadGarage() {
         </div>
       </div>
       <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px">
-        ${vin && !s.hidden ? `<button id="${rowId}_view_btn" style="font-size:11px">📖 View passport</button>` : ""}
+        ${(vin || s.passport_urn) && !s.hidden ? `<button id="${rowId}_view_btn" style="font-size:11px">📖 View passport</button>` : ""}
         ${s.hidden
           ? `<button id="${rowId}_unhide_btn" style="font-size:11px">↺ Restore to garage</button>`
           : `<button id="${rowId}_hide_btn" style="font-size:11px">🗑 Remove from garage</button>`}
