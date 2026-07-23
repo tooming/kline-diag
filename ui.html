@@ -4232,8 +4232,10 @@ async function loadGarage() {
       await api("/api/garage/identify", { urn, nickname });
       loadGarage();
     };
+    if (vin || urn) {
+      $(`${rowId}_view_btn`).onclick = () => openPassportFor(vin, urn);
+    }
     if (!vin) return;
-    $(`${rowId}_view_btn`).onclick = () => openPassportFor(vin, urn);
     $(`${rowId}_btn`).onclick = async () => {
       const serviceType = $(`${rowId}_type`).value.trim();
       const result = $(`${rowId}_result`);
