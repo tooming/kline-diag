@@ -1546,7 +1546,8 @@ def _csv_value(chan_id, values):
 RECORDER = {"on": False, "path": None, "file": None, "count": 0,
             "lock": threading.Lock()}
 CSV_QUEUE = queue.Queue(maxsize=1000)  # Buffer for CSV writer thread
-PULL_STATE = {"active": False, "counter": 0, "rpm_history": []}
+PULL_STATE = {"active": False, "counter": 0, "rpm_history": [],
+              "max_throttle_seen": 0.0}
 PULLS_LOG = []  # finished pulls this session: [{num, t_start, t_end, peaks}]
 
 
@@ -1888,8 +1889,23 @@ def detect_pull(values):
                 peaks[k] = v
 
     if not PULL_STATE["active"]:
+        # Start threshold: 80% of a *plausible* 0-100% TPS reading, but
+        # some cars' throttle never reads anywhere near that -- found live
+        # on a second MS41/M52 car whose P13 (RomRaider expr x*100/255,
+        # car-verified only against a different DME/TPS pairing, see
+        # dme_registry.py's MS41 evidence note) plateaued at ~78% during a
+        # sustained WOT run all the way to redline, so a flat ">80" never
+        # fired for the car's entire session. Track the highest throttle
+        # actually seen so far and require getting within ~8pp of it (with
+        # an 80% ceiling so a car that genuinely reaches 100% still needs a
+        # real WOT-ish input, and a 60% floor so this can't fire during
+        # ordinary light driving before a real peak has ever been seen).
+        seen = PULL_STATE.get("max_throttle_seen", 0.0)
+        start_threshold = min(80.0, max(60.0, seen - 8.0))
+        if throttle > seen:
+            PULL_STATE["max_throttle_seen"] = throttle
         # Check for pull start
-        if throttle > 80 and rpm_increasing:
+        if throttle > start_threshold and rpm_increasing:
             PULL_STATE["active"] = True
             PULL_STATE["counter"] += 1
             PULL_STATE["peaks"] = {}
