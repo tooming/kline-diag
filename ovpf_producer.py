@@ -295,6 +295,29 @@ def record_dyno_run(vin, peaks, duration_s=None, num=None, curve_ref=None,
     if not peaks:
         return None
     path, urn = ensure_passport(vin)
+    return _append_dyno_run(path, urn, peaks, duration_s, num, curve_ref,
+                             operator, corrects)
+
+
+def record_dyno_run_by_urn(urn, peaks, duration_s=None, num=None,
+                            curve_ref=None, operator=None, corrects=None):
+    """Same as record_dyno_run, but for a passport that already exists and
+    is only known by urn -- e.g. a garage vehicle with no VIN yet (same
+    need as record_vehicle_identified_by_urn). Never mints a new passport:
+    _log_path(vin)'s "unknown"/vin-placeholder fallback would silently
+    file the run under the wrong (or a shared anonymous) passport instead
+    of the garage vehicle it actually came from."""
+    if not peaks:
+        return None
+    path = _path_for_urn(urn)
+    if not path:
+        return None
+    return _append_dyno_run(path, urn, peaks, duration_s, num, curve_ref,
+                             operator, corrects)
+
+
+def _append_dyno_run(path, urn, peaks, duration_s, num, curve_ref,
+                      operator, corrects):
     data = {}
     if "power_kw" in peaks:
         data["power"] = {"value": peaks["power_kw"], "unit": "kW"}

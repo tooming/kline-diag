@@ -2196,13 +2196,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/dyno/runs"):
             # Past dyno curves for a vehicle, read straight from its OVPF
             # passport log (DynoRun events) -- no second index to drift out
-            # of sync with the log. ?vin= browses any garage vehicle, same
-            # convention as _qs_passport_state(); defaults to the connected
-            # car.
+            # of sync with the log. ?urn=/?vin= browse any garage vehicle,
+            # same convention as _qs_passport_state() -- urn preferred, a
+            # VIN-less garage vehicle can only be found by urn (_log_path(vin)
+            # would silently resolve to the shared "unknown" passport
+            # instead). Defaults to the connected car.
             q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+            urn = (q.get("urn") or [""])[0].strip()
             vin = (q.get("vin") or [""])[0].strip() or _current_vin()
             try:
-                path = ovpf_producer._log_path(vin)
+                path = ovpf_producer.resolve_log_path(vin=vin, urn=urn or None)
                 events = ovpf_producer.ovpf_core.load(path)
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
@@ -2229,9 +2232,10 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlsplit(self.path)
             curve_id = parsed.path[len("/api/dyno/curve/"):]
             q = urllib.parse.parse_qs(parsed.query)
+            urn = (q.get("urn") or [""])[0].strip()
             vin = (q.get("vin") or [""])[0].strip() or _current_vin()
             curve_path = os.path.join(
-                _snap.BACKUP_ROOT, _snap._safe_vin(vin), "dyno_runs",
+                _snap.BACKUP_ROOT, _snap._safe_vin(urn or vin), "dyno_runs",
                 curve_id + ".json")
             real_root = os.path.realpath(_snap.BACKUP_ROOT)
             real_curve = os.path.realpath(curve_path)
@@ -3398,16 +3402,26 @@ class Handler(BaseHTTPRequestHandler):
                 # timeline instead of sitting there contradicting the new one.
                 import snapshot as _snap
                 b = self._body()
+                # urn (a garage vehicle with no VIN yet) takes priority over
+                # vin, same precedence as ovpf_producer.resolve_log_path --
+                # a bare vin fallback here used to silently file a VIN-less
+                # car's pull under the shared "unknown"/placeholder-VIN
+                # passport instead of its own garage entry (found live: a
+                # pull saved for a connected-but-unidentified E39 never
+                # showed up on that car's own passport page).
+                urn = (b.get("urn") or "").strip()
                 vin = (b.get("vin") or "").strip() or _current_vin()
                 curve = b.get("curve")
                 if not curve or not curve.get("bins"):
                     return self._json({"error": "curve with bins required"}, 400)
                 curve_id = str(uuid.uuid4())
-                vdir = os.path.join(_snap.BACKUP_ROOT, _snap._safe_vin(vin),
-                                    "dyno_runs")
+                vdir = os.path.join(_snap.BACKUP_ROOT,
+                                    _snap._safe_vin(urn or vin), "dyno_runs")
                 os.makedirs(vdir, exist_ok=True)
                 curve["id"] = curve_id
                 curve["vin"] = vin
+                if urn:
+                    curve["urn"] = urn
                 curve["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
                 if b.get("note"):
                     curve["note"] = b["note"]
@@ -3427,16 +3441,18 @@ class Handler(BaseHTTPRequestHandler):
                 peaks_payload.update({k: v for k, v in curve.get("conditions", {}).items()
                                        if v is not None})
                 try:
-                    ovpf_producer.record_dyno_run(
-                        vin,
-                        peaks_payload,
+                    dyno_kwargs = dict(
                         duration_s=(curve.get("window", {}).get("t_end", 0)
                                    - curve.get("window", {}).get("t_start", 0)) or None,
                         num=curve.get("pull_num"),
                         curve_ref=f"dyno_runs/{curve_id}.json",
                         operator=_current_operator(),
                         corrects=b.get("corrects"))
-                    _auto_push(vin)
+                    if urn:
+                        ovpf_producer.record_dyno_run_by_urn(urn, peaks_payload, **dyno_kwargs)
+                    else:
+                        ovpf_producer.record_dyno_run(vin, peaks_payload, **dyno_kwargs)
+                    _auto_push(vin, urn=urn or None)
                 except Exception:
                     pass
                 self._json({"id": curve_id, "curveRef": f"dyno_runs/{curve_id}.json"})
