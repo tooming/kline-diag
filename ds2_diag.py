@@ -110,8 +110,15 @@ class DS2:
     def __init__(self, kl):
         self.kl = kl
 
-    def _read_frame(self, deadline):
-        """Parse one DS2 frame [addr, len, ..., xor] from the stream."""
+    def _read_frame(self, deadline, want_addr=None):
+        """Parse one DS2 frame [addr, len, ..., xor] from the stream.
+
+        If want_addr is given, frames addressed to any other ECU are
+        discarded (not returned) instead of being mistaken for our
+        response -- some ECUs (e.g. the DME) emit unsolicited/cyclic
+        frames on the bus that can otherwise land in an unrelated
+        request's read window and get misattributed to it.
+        """
         while now() < deadline:
             buf = self.kl.buf
             # drop leading nulls (bus noise)
@@ -126,6 +133,8 @@ class DS2:
                         if xor(frame[:-1]) == frame[-1]:
                             self.kl.buf = buf[ln:]
                             self.kl.log("<<", frame)
+                            if want_addr is not None and frame[0] != want_addr:
+                                continue  # not ours: keep waiting
                             return frame
                         self.kl.buf = buf[1:]  # bad cks: resync
                         continue
@@ -153,7 +162,7 @@ class DS2:
             b = self.kl.buf.lstrip(b"\x00")
             if b[: len(msg)] == msg:
                 self.kl.buf = b[len(msg):]
-            f = self._read_frame(deadline)
+            f = self._read_frame(deadline, want_addr=addr)
             if f is not None:
                 return f
         return None
